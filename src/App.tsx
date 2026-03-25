@@ -1,14 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { supabase } from "./lib/supabase";
 
 type FuelEntry = {
   id: string;
+  user_id: string;
   date: string;
   liters: number;
-  totalPrice: number;
+  total_price: number;
   odometer: number;
-  fuelType: string;
+  fuel_type: string;
   station: string;
   notes: string;
+  created_at?: string;
 };
 
 type EnrichedFuelEntry = FuelEntry & {
@@ -22,7 +26,7 @@ type EnrichedFuelEntry = FuelEntry & {
   kmPerDay: number | null;
 };
 
-const STORAGE_KEY = "fuel-tracker-hebrew-entries";
+type AuthMode = "login" | "signup";
 
 function todayValue(): string {
   return new Date().toISOString().split("T")[0];
@@ -45,34 +49,15 @@ function formatCurrency(value: number | null | undefined): string {
   }).format(value);
 }
 
-function downloadFile(filename: string, content: string, type: string) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(url);
-}
-
-function csvEscape(value: unknown): string {
-  const str = String(value ?? "");
-  if (str.includes(",") || str.includes("\n") || str.includes('"')) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
-}
-
 export default function App() {
-  const [entries, setEntries] = useState<FuelEntry[]>(() => {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return [];
-    try {
-      return JSON.parse(saved) as FuelEntry[];
-    } catch {
-      return [];
-    }
-  });
+  const [session, setSession] = useState<Session | null>(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
+  const [entries, setEntries] = useState<FuelEntry[]>([]);
+  const [loadingEntries, setLoadingEntries] = useState(false);
+
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   const [form, setForm] = useState({
     date: todayValue(),
@@ -84,11 +69,83 @@ export default function App() {
     notes: "",
   });
 
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => {
+      setSession(data.session ?? null);
+      setLoadingAuth(false);
+    });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_, newSession) => {
+      setSession(newSession);
+    });
+
+    return () => subscription.unsubscribe();
+  }, []);
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-  }, [entries]);
+    if (session?.user?.id) {
+      loadEntries(session.user.id);
+    } else {
+      setEntries([]);
+    }
+  }, [session]);
+
+  async function loadEntries(userId: string) {
+    setLoadingEntries(true);
+
+    const { data, error } = await supabase
+      .from("fuel_entries")
+      .select("*")
+      .eq("user_id", userId)
+      .order("date", { ascending: true })
+      .order("odometer", { ascending: true });
+
+    setLoadingEntries(false);
+
+    if (error) {
+      alert("שגיאה בטעינת הנתונים");
+      return;
+    }
+
+    setEntries((data ?? []) as FuelEntry[]);
+  }
+
+  async function handleAuth() {
+    if (!email || !password) {
+      alert("מלא אימייל וסיסמה");
+      return;
+    }
+
+    if (authMode === "signup") {
+      const { error } = await supabase.auth.signUp({
+        email,
+        password,
+      });
+
+      if (error) {
+        alert(error.message);
+        return;
+      }
+
+      alert("המשתמש נוצר. אם נשלח מייל אימות, צריך לאשר אותו.");
+      return;
+    }
+
+    const { error } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    });
+
+    if (error) {
+      alert(error.message);
+    }
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+  }
 
   const sortedEntries = useMemo(() => {
     return [...entries].sort((a, b) => {
@@ -101,7 +158,7 @@ export default function App() {
   const enrichedEntries = useMemo<EnrichedFuelEntry[]>(() => {
     return sortedEntries.map((entry, index) => {
       const prev = sortedEntries[index - 1];
-      const pricePerLiter = entry.totalPrice / entry.liters;
+      const pricePerLiter = entry.total_price / entry.liters;
 
       const daysFromPrev =
         prev !== undefined
@@ -134,14 +191,14 @@ export default function App() {
         prev !== undefined &&
         distanceFromPrev !== null &&
         distanceFromPrev > 0
-          ? entry.totalPrice / distanceFromPrev
+          ? entry.total_price / distanceFromPrev
           : null;
 
       const costPerDay =
         prev !== undefined &&
         daysFromPrev !== null &&
         daysFromPrev > 0
-          ? entry.totalPrice / daysFromPrev
+          ? entry.total_price / daysFromPrev
           : null;
 
       const kmPerDay =
@@ -169,7 +226,7 @@ export default function App() {
 
   const totals = useMemo(() => {
     const totalLiters = enrichedEntries.reduce((sum, e) => sum + e.liters, 0);
-    const totalCost = enrichedEntries.reduce((sum, e) => sum + e.totalPrice, 0);
+    const totalCost = enrichedEntries.reduce((sum, e) => sum + e.total_price, 0);
 
     let totalDistance = 0;
     let totalDays = 0;
@@ -205,7 +262,9 @@ export default function App() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
-  function addEntry() {
+  async function addEntry() {
+    if (!session?.user?.id) return;
+
     const liters = Number(form.liters);
     const totalPrice = Number(form.totalPrice);
     const odometer = Number(form.odometer);
@@ -221,18 +280,21 @@ export default function App() {
       return;
     }
 
-    const newEntry: FuelEntry = {
-      id: crypto.randomUUID(),
+    const { error } = await supabase.from("fuel_entries").insert({
+      user_id: session.user.id,
       date: form.date,
       liters,
-      totalPrice,
+      total_price: totalPrice,
       odometer,
-      fuelType: form.fuelType,
+      fuel_type: form.fuelType,
       station: form.station,
       notes: form.notes,
-    };
+    });
 
-    setEntries((prev) => [...prev, newEntry]);
+    if (error) {
+      alert(error.message);
+      return;
+    }
 
     setForm({
       date: todayValue(),
@@ -243,90 +305,77 @@ export default function App() {
       station: "",
       notes: "",
     });
+
+    await loadEntries(session.user.id);
   }
 
-  function deleteEntry(id: string) {
-    setEntries((prev) => prev.filter((e) => e.id !== id));
-  }
+  async function deleteEntry(id: string) {
+    const { error } = await supabase.from("fuel_entries").delete().eq("id", id);
 
-  function clearAll() {
-    const ok = window.confirm("למחוק את כל הנתונים?");
-    if (!ok) return;
-    setEntries([]);
-    localStorage.removeItem(STORAGE_KEY);
-  }
-
-  function exportJson() {
-    downloadFile(
-      `fuel-backup-${todayValue()}.json`,
-      JSON.stringify(entries, null, 2),
-      "application/json;charset=utf-8"
-    );
-  }
-
-  function exportCsv() {
-    const headers = [
-      "תאריך",
-      "ליטרים",
-      "מחיר כולל",
-      "מחיר לליטר",
-      "קילומטראז׳",
-      "סוג דלק",
-      "תחנה",
-      "הערות",
-      "מרחק מהתדלוק הקודם",
-      "ימים מהתדלוק הקודם",
-      'ק"מ לליטר',
-      'ליטר ל-100 ק"מ',
-      'עלות לק"מ',
-      'ק"מ ליום',
-      "עלות ליום",
-    ];
-
-    const rows = enrichedEntries.map((entry) => [
-      entry.date,
-      entry.liters,
-      entry.totalPrice,
-      entry.pricePerLiter,
-      entry.odometer,
-      entry.fuelType,
-      entry.station,
-      entry.notes,
-      entry.distanceFromPrev ?? "",
-      entry.daysFromPrev ?? "",
-      entry.kmPerLiter ?? "",
-      entry.litersPer100Km ?? "",
-      entry.costPerKm ?? "",
-      entry.kmPerDay ?? "",
-      entry.costPerDay ?? "",
-    ]);
-
-    const csv = [headers, ...rows]
-      .map((row) => row.map(csvEscape).join(","))
-      .join("\n");
-
-    downloadFile(
-      `fuel-report-${todayValue()}.csv`,
-      "\uFEFF" + csv,
-      "text/csv;charset=utf-8"
-    );
-  }
-
-  async function importJson(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as FuelEntry[];
-      if (!Array.isArray(parsed)) throw new Error("Invalid file");
-      setEntries(parsed);
-      alert("הגיבוי נטען בהצלחה");
-    } catch {
-      alert("הקובץ לא תקין");
+    if (error) {
+      alert(error.message);
+      return;
     }
 
-    event.target.value = "";
+    if (session?.user?.id) {
+      await loadEntries(session.user.id);
+    }
+  }
+
+  if (loadingAuth) {
+    return <div style={styles.centered}>טוען...</div>;
+  }
+
+  if (!session) {
+    return (
+      <div style={styles.page} dir="rtl">
+        <div style={styles.authCard}>
+          <h1 style={styles.title}>כניסה לאתר</h1>
+          <p style={styles.subtitle}>צור משתמש עם אימייל וסיסמה, או התחבר אם כבר נרשמת.</p>
+
+          <div style={styles.authTabs}>
+            <button
+              style={authMode === "login" ? styles.buttonPrimary : styles.button}
+              onClick={() => setAuthMode("login")}
+            >
+              התחברות
+            </button>
+            <button
+              style={authMode === "signup" ? styles.buttonPrimary : styles.button}
+              onClick={() => setAuthMode("signup")}
+            >
+              הרשמה
+            </button>
+          </div>
+
+          <div style={styles.formGrid}>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={styles.label}>אימייל</label>
+              <input
+                style={styles.input}
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </div>
+
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={styles.label}>סיסמה</label>
+              <input
+                style={styles.input}
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </div>
+          </div>
+
+          <button style={styles.buttonPrimary} onClick={handleAuth}>
+            {authMode === "signup" ? "צור משתמש" : "התחבר"}
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const lastOdometer =
@@ -335,11 +384,15 @@ export default function App() {
   return (
     <div style={styles.page} dir="rtl">
       <div style={styles.container}>
-        <h1 style={styles.title}>מעקב תדלוקים וצריכת דלק</h1>
-        <p style={styles.subtitle}>
-          ממלאים בכל תדלוק: ליטרים, מחיר כולל, קילומטראז׳, סוג דלק ותחנה.
-          האתר שומר את הנתונים ומחשב אוטומטית את כל המדדים החשובים.
-        </p>
+        <div style={styles.topBar}>
+          <div>
+            <h1 style={styles.title}>מעקב תדלוקים וצריכת דלק</h1>
+            <p style={styles.subtitle}>מחובר בתור: {session.user.email}</p>
+          </div>
+          <button style={styles.buttonDanger} onClick={handleLogout}>
+            התנתק
+          </button>
+        </div>
 
         <div style={styles.infoBox}>
           קילומטראז׳ אחרון: {lastOdometer ? formatNumber(lastOdometer, 0) : "-"} ק"מ
@@ -431,25 +484,6 @@ export default function App() {
             <button style={styles.buttonPrimary} onClick={addEntry}>
               שמור תדלוק
             </button>
-            <button style={styles.button} onClick={exportCsv}>
-              ייצוא CSV
-            </button>
-            <button style={styles.button} onClick={exportJson}>
-              גיבוי JSON
-            </button>
-            <button style={styles.button} onClick={() => fileInputRef.current?.click()}>
-              טעינת גיבוי
-            </button>
-            <button style={styles.buttonDanger} onClick={clearAll}>
-              מחק הכל
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="application/json"
-              style={{ display: "none" }}
-              onChange={importJson}
-            />
           </div>
         </div>
 
@@ -468,65 +502,69 @@ export default function App() {
         <div style={styles.card}>
           <h2 style={styles.sectionTitle}>פירוט כל התדלוקים</h2>
 
-          <div style={{ overflowX: "auto" }}>
-            <table style={styles.table}>
-              <thead>
-                <tr>
-                  <th style={styles.th}>תאריך</th>
-                  <th style={styles.th}>ליטרים</th>
-                  <th style={styles.th}>מחיר כולל</th>
-                  <th style={styles.th}>מחיר לליטר</th>
-                  <th style={styles.th}>קילומטראז׳</th>
-                  <th style={styles.th}>סוג דלק</th>
-                  <th style={styles.th}>תחנה</th>
-                  <th style={styles.th}>מרחק קודם</th>
-                  <th style={styles.th}>ימים</th>
-                  <th style={styles.th}>ק"מ לליטר</th>
-                  <th style={styles.th}>ליטר ל-100</th>
-                  <th style={styles.th}>עלות לק"מ</th>
-                  <th style={styles.th}>ק"מ ליום</th>
-                  <th style={styles.th}>עלות ליום</th>
-                  <th style={styles.th}>מחיקה</th>
-                </tr>
-              </thead>
-              <tbody>
-                {enrichedEntries.length === 0 ? (
+          {loadingEntries ? (
+            <div>טוען נתונים...</div>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={styles.table}>
+                <thead>
                   <tr>
-                    <td style={styles.td} colSpan={15}>
-                      עדיין אין נתונים
-                    </td>
+                    <th style={styles.th}>תאריך</th>
+                    <th style={styles.th}>ליטרים</th>
+                    <th style={styles.th}>מחיר כולל</th>
+                    <th style={styles.th}>מחיר לליטר</th>
+                    <th style={styles.th}>קילומטראז׳</th>
+                    <th style={styles.th}>סוג דלק</th>
+                    <th style={styles.th}>תחנה</th>
+                    <th style={styles.th}>מרחק קודם</th>
+                    <th style={styles.th}>ימים</th>
+                    <th style={styles.th}>ק"מ לליטר</th>
+                    <th style={styles.th}>ליטר ל-100</th>
+                    <th style={styles.th}>עלות לק"מ</th>
+                    <th style={styles.th}>ק"מ ליום</th>
+                    <th style={styles.th}>עלות ליום</th>
+                    <th style={styles.th}>מחיקה</th>
                   </tr>
-                ) : (
-                  enrichedEntries.map((entry) => (
-                    <tr key={entry.id}>
-                      <td style={styles.td}>{entry.date}</td>
-                      <td style={styles.td}>{formatNumber(entry.liters)}</td>
-                      <td style={styles.td}>{formatCurrency(entry.totalPrice)}</td>
-                      <td style={styles.td}>{formatCurrency(entry.pricePerLiter)}</td>
-                      <td style={styles.td}>{formatNumber(entry.odometer, 0)}</td>
-                      <td style={styles.td}>{entry.fuelType || "-"}</td>
-                      <td style={styles.td}>{entry.station || "-"}</td>
-                      <td style={styles.td}>{formatNumber(entry.distanceFromPrev, 0)}</td>
-                      <td style={styles.td}>{formatNumber(entry.daysFromPrev, 0)}</td>
-                      <td style={styles.td}>{formatNumber(entry.kmPerLiter)}</td>
-                      <td style={styles.td}>{formatNumber(entry.litersPer100Km)}</td>
-                      <td style={styles.td}>{formatCurrency(entry.costPerKm)}</td>
-                      <td style={styles.td}>{formatNumber(entry.kmPerDay)}</td>
-                      <td style={styles.td}>{formatCurrency(entry.costPerDay)}</td>
-                      <td style={styles.td}>
-                        <button
-                          style={styles.deleteSmall}
-                          onClick={() => deleteEntry(entry.id)}
-                        >
-                          מחק
-                        </button>
+                </thead>
+                <tbody>
+                  {enrichedEntries.length === 0 ? (
+                    <tr>
+                      <td style={styles.td} colSpan={15}>
+                        עדיין אין נתונים
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+                  ) : (
+                    enrichedEntries.map((entry) => (
+                      <tr key={entry.id}>
+                        <td style={styles.td}>{entry.date}</td>
+                        <td style={styles.td}>{formatNumber(entry.liters)}</td>
+                        <td style={styles.td}>{formatCurrency(entry.total_price)}</td>
+                        <td style={styles.td}>{formatCurrency(entry.pricePerLiter)}</td>
+                        <td style={styles.td}>{formatNumber(entry.odometer, 0)}</td>
+                        <td style={styles.td}>{entry.fuel_type || "-"}</td>
+                        <td style={styles.td}>{entry.station || "-"}</td>
+                        <td style={styles.td}>{formatNumber(entry.distanceFromPrev, 0)}</td>
+                        <td style={styles.td}>{formatNumber(entry.daysFromPrev, 0)}</td>
+                        <td style={styles.td}>{formatNumber(entry.kmPerLiter)}</td>
+                        <td style={styles.td}>{formatNumber(entry.litersPer100Km)}</td>
+                        <td style={styles.td}>{formatCurrency(entry.costPerKm)}</td>
+                        <td style={styles.td}>{formatNumber(entry.kmPerDay)}</td>
+                        <td style={styles.td}>{formatCurrency(entry.costPerDay)}</td>
+                        <td style={styles.td}>
+                          <button
+                            style={styles.deleteSmall}
+                            onClick={() => deleteEntry(entry.id)}
+                          >
+                            מחק
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -554,6 +592,28 @@ const styles: Record<string, React.CSSProperties> = {
     maxWidth: "1200px",
     margin: "0 auto",
   },
+  authCard: {
+    maxWidth: "480px",
+    margin: "60px auto",
+    background: "#ffffff",
+    borderRadius: "16px",
+    padding: "24px",
+    boxShadow: "0 2px 10px rgba(0,0,0,0.05)",
+  },
+  centered: {
+    minHeight: "100vh",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontFamily: "Arial, sans-serif",
+  },
+  topBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: "12px",
+    marginBottom: "12px",
+  },
   title: {
     fontSize: "32px",
     marginBottom: "8px",
@@ -580,6 +640,11 @@ const styles: Record<string, React.CSSProperties> = {
     marginTop: 0,
     marginBottom: "16px",
     fontSize: "22px",
+  },
+  authTabs: {
+    display: "flex",
+    gap: "10px",
+    marginBottom: "16px",
   },
   formGrid: {
     display: "grid",
