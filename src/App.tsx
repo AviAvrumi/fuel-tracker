@@ -15,6 +15,15 @@ type FuelEntry = {
   created_at?: string;
 };
 
+type Profile = {
+  id: string;
+  email: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  year: number | null;
+  created_at?: string;
+};
+
 type EnrichedFuelEntry = FuelEntry & {
   pricePerLiter: number;
   daysFromPrev: number | null;
@@ -52,12 +61,22 @@ function formatCurrency(value: number | null | undefined): string {
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
+
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loadingProfile, setLoadingProfile] = useState(false);
+
   const [entries, setEntries] = useState<FuelEntry[]>([]);
   const [loadingEntries, setLoadingEntries] = useState(false);
 
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
+  const [vehicleForm, setVehicleForm] = useState({
+    manufacturer: "",
+    model: "",
+    year: "",
+  });
 
   const [form, setForm] = useState({
     date: todayValue(),
@@ -86,11 +105,52 @@ export default function App() {
 
   useEffect(() => {
     if (session?.user?.id) {
+      loadProfile(session.user.id, session.user.email ?? null);
       loadEntries(session.user.id);
     } else {
+      setProfile(null);
       setEntries([]);
     }
   }, [session]);
+
+  async function loadProfile(userId: string, userEmail: string | null) {
+    setLoadingProfile(true);
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("*")
+      .eq("id", userId)
+      .maybeSingle();
+
+    setLoadingProfile(false);
+
+    if (error) {
+      alert("שגיאה בטעינת פרופיל הרכב");
+      return;
+    }
+
+    if (!data) {
+      setProfile(null);
+      setVehicleForm({
+        manufacturer: "",
+        model: "",
+        year: "",
+      });
+      return;
+    }
+
+    const loadedProfile = data as Profile;
+    setProfile(loadedProfile);
+    setVehicleForm({
+      manufacturer: loadedProfile.manufacturer ?? "",
+      model: loadedProfile.model ?? "",
+      year: loadedProfile.year ? String(loadedProfile.year) : "",
+    });
+
+    if (!loadedProfile.email && userEmail) {
+      await supabase.from("profiles").update({ email: userEmail }).eq("id", userId);
+    }
+  }
 
   async function loadEntries(userId: string) {
     setLoadingEntries(true);
@@ -145,6 +205,44 @@ export default function App() {
 
   async function handleLogout() {
     await supabase.auth.signOut();
+  }
+
+  function updateVehicleForm(field: string, value: string) {
+    setVehicleForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function saveVehicleProfile() {
+    if (!session?.user?.id) return;
+
+    const yearNumber = Number(vehicleForm.year);
+
+    if (!vehicleForm.manufacturer || !vehicleForm.model || !vehicleForm.year) {
+      alert("צריך למלא יצרן, דגם ושנה");
+      return;
+    }
+
+    if (!yearNumber || yearNumber < 1950 || yearNumber > 2100) {
+      alert("שנת הרכב לא תקינה");
+      return;
+    }
+
+    const payload = {
+      id: session.user.id,
+      email: session.user.email ?? null,
+      manufacturer: vehicleForm.manufacturer,
+      model: vehicleForm.model,
+      year: yearNumber,
+    };
+
+    const { error } = await supabase.from("profiles").upsert(payload);
+
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    await loadProfile(session.user.id, session.user.email ?? null);
+    alert("פרטי הרכב נשמרו");
   }
 
   const sortedEntries = useMemo(() => {
@@ -264,6 +362,10 @@ export default function App() {
 
   async function addEntry() {
     if (!session?.user?.id) return;
+    if (!profile?.manufacturer || !profile?.model || !profile?.year) {
+      alert("צריך קודם לשמור את פרטי הרכב");
+      return;
+    }
 
     const liters = Number(form.liters);
     const totalPrice = Number(form.totalPrice);
@@ -392,6 +494,64 @@ export default function App() {
           <button style={styles.buttonDanger} onClick={handleLogout}>
             התנתק
           </button>
+        </div>
+
+        <div style={styles.card}>
+          <h2 style={styles.sectionTitle}>פרטי הרכב</h2>
+
+          {loadingProfile ? (
+            <div>טוען פרטי רכב...</div>
+          ) : (
+            <>
+              <div style={styles.formGrid}>
+                <div>
+                  <label style={styles.label}>יצרן</label>
+                  <input
+                    style={styles.input}
+                    type="text"
+                    value={vehicleForm.manufacturer}
+                    onChange={(e) => updateVehicleForm("manufacturer", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label style={styles.label}>דגם</label>
+                  <input
+                    style={styles.input}
+                    type="text"
+                    value={vehicleForm.model}
+                    onChange={(e) => updateVehicleForm("model", e.target.value)}
+                  />
+                </div>
+
+                <div>
+                  <label style={styles.label}>שנה</label>
+                  <input
+                    style={styles.input}
+                    type="number"
+                    value={vehicleForm.year}
+                    onChange={(e) => updateVehicleForm("year", e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <div style={styles.buttonRow}>
+                <button style={styles.buttonPrimary} onClick={saveVehicleProfile}>
+                  שמור פרטי רכב
+                </button>
+              </div>
+
+              {profile?.manufacturer && profile?.model && profile?.year ? (
+                <div style={styles.vehicleBox}>
+                  הרכב השמור שלך: {profile.manufacturer} {profile.model} {profile.year}
+                </div>
+              ) : (
+                <div style={styles.vehicleBox}>
+                  עדיין לא שמרת פרטי רכב. צריך לשמור כדי להתחיל להשוות בעתיד לממוצע.
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         <div style={styles.infoBox}>
@@ -628,6 +788,12 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "12px",
     marginBottom: "20px",
     display: "inline-block",
+  },
+  vehicleBox: {
+    marginTop: "14px",
+    background: "#eef2ff",
+    padding: "12px 16px",
+    borderRadius: "12px",
   },
   card: {
     background: "#ffffff",
