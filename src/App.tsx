@@ -2,6 +2,19 @@ import { useEffect, useMemo, useState } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "./lib/supabase";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type AuthMode = "login" | "signup";
+
+type Profile = {
+  id: string;
+  email: string | null;
+  manufacturer: string | null;
+  model: string | null;
+  year: number | null;
+  created_at?: string;
+};
+
 type FuelEntry = {
   id: string;
   user_id: string;
@@ -12,15 +25,6 @@ type FuelEntry = {
   fuel_type: string;
   station: string;
   notes: string;
-  created_at?: string;
-};
-
-type Profile = {
-  id: string;
-  email: string | null;
-  manufacturer: string | null;
-  model: string | null;
-  year: number | null;
   created_at?: string;
 };
 
@@ -35,7 +39,35 @@ type EnrichedFuelEntry = FuelEntry & {
   kmPerDay: number | null;
 };
 
-type AuthMode = "login" | "signup";
+type VehicleFormState = {
+  manufacturer: string;
+  model: string;
+  year: string;
+};
+
+type FuelFormState = {
+  date: string;
+  liters: string;
+  totalPrice: string;
+  odometer: string;
+  fuelType: string;
+  station: string;
+  notes: string;
+};
+
+type Totals = {
+  totalLiters: number;
+  totalCost: number;
+  totalDistance: number;
+  avgPricePerLiter: number | null;
+  avgKmPerLiter: number | null;
+  avgLitersPer100Km: number | null;
+  avgCostPerKm: number | null;
+  avgKmPerDay: number | null;
+  avgCostPerDay: number | null;
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function todayValue(): string {
   return new Date().toISOString().split("T")[0];
@@ -58,6 +90,472 @@ function formatCurrency(value: number | null | undefined): string {
   }).format(value);
 }
 
+function enrichEntries(sorted: FuelEntry[]): EnrichedFuelEntry[] {
+  return sorted.map((entry, index) => {
+    const prev = sorted[index - 1];
+    const pricePerLiter = entry.total_price / entry.liters;
+
+    const daysFromPrev =
+      prev !== undefined
+        ? Math.round(
+            (new Date(entry.date).getTime() - new Date(prev.date).getTime()) /
+              (1000 * 60 * 60 * 24)
+          )
+        : null;
+
+    const distanceFromPrev =
+      prev !== undefined ? entry.odometer - prev.odometer : null;
+
+    const kmPerLiter =
+      distanceFromPrev !== null && distanceFromPrev > 0 && entry.liters > 0
+        ? distanceFromPrev / entry.liters
+        : null;
+
+    const litersPer100Km =
+      distanceFromPrev !== null && distanceFromPrev > 0 && entry.liters > 0
+        ? (entry.liters / distanceFromPrev) * 100
+        : null;
+
+    const costPerKm =
+      distanceFromPrev !== null && distanceFromPrev > 0
+        ? entry.total_price / distanceFromPrev
+        : null;
+
+    const costPerDay =
+      daysFromPrev !== null && daysFromPrev > 0
+        ? entry.total_price / daysFromPrev
+        : null;
+
+    const kmPerDay =
+      daysFromPrev !== null &&
+      daysFromPrev > 0 &&
+      distanceFromPrev !== null &&
+      distanceFromPrev > 0
+        ? distanceFromPrev / daysFromPrev
+        : null;
+
+    return {
+      ...entry,
+      pricePerLiter,
+      daysFromPrev,
+      distanceFromPrev,
+      kmPerLiter,
+      litersPer100Km,
+      costPerKm,
+      costPerDay,
+      kmPerDay,
+    };
+  });
+}
+
+function calcTotals(enriched: EnrichedFuelEntry[]): Totals {
+  const totalLiters = enriched.reduce((sum, e) => sum + e.liters, 0);
+  const totalCost = enriched.reduce((sum, e) => sum + e.total_price, 0);
+  let totalDistance = 0;
+  let totalDays = 0;
+
+  for (const e of enriched) {
+    if (e.distanceFromPrev !== null && e.distanceFromPrev > 0) {
+      totalDistance += e.distanceFromPrev;
+    }
+    if (e.daysFromPrev !== null && e.daysFromPrev > 0) {
+      totalDays += e.daysFromPrev;
+    }
+  }
+
+  return {
+    totalLiters,
+    totalCost,
+    totalDistance,
+    avgPricePerLiter: totalLiters > 0 ? totalCost / totalLiters : null,
+    avgKmPerLiter:
+      totalLiters > 0 && totalDistance > 0 ? totalDistance / totalLiters : null,
+    avgLitersPer100Km:
+      totalDistance > 0 && totalLiters > 0
+        ? (totalLiters / totalDistance) * 100
+        : null,
+    avgCostPerKm: totalDistance > 0 ? totalCost / totalDistance : null,
+    avgKmPerDay: totalDays > 0 ? totalDistance / totalDays : null,
+    avgCostPerDay: totalDays > 0 ? totalCost / totalDays : null,
+  };
+}
+
+function defaultFuelForm(): FuelFormState {
+  return {
+    date: todayValue(),
+    liters: "",
+    totalPrice: "",
+    odometer: "",
+    fuelType: "בנזין 95",
+    station: "",
+    notes: "",
+  };
+}
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function StatCard({ title, value }: { title: string; value: string }) {
+  return (
+    <div style={styles.statCard}>
+      <div style={styles.statTitle}>{title}</div>
+      <div style={styles.statValue}>{value}</div>
+    </div>
+  );
+}
+
+function LoadingScreen() {
+  return <div style={styles.centered}>טוען...</div>;
+}
+
+// ─── Auth Screen ──────────────────────────────────────────────────────────────
+
+type AuthScreenProps = {
+  authMode: AuthMode;
+  email: string;
+  password: string;
+  onModeChange: (mode: AuthMode) => void;
+  onEmailChange: (v: string) => void;
+  onPasswordChange: (v: string) => void;
+  onSubmit: () => void;
+  onGoogleLogin: () => void;
+};
+
+function AuthScreen({
+  authMode,
+  email,
+  password,
+  onModeChange,
+  onEmailChange,
+  onPasswordChange,
+  onSubmit,
+  onGoogleLogin,
+}: AuthScreenProps) {
+  return (
+    <div style={styles.page} dir="rtl">
+      <div style={styles.authCard}>
+        <h1 style={styles.title}>מעקב תדלוקים</h1>
+        <p style={styles.subtitle}>
+          צור משתמש עם אימייל וסיסמה, או התחבר אם כבר נרשמת.
+        </p>
+
+        <div style={styles.authTabs}>
+          <button
+            style={authMode === "login" ? styles.buttonPrimary : styles.button}
+            onClick={() => onModeChange("login")}
+          >
+            התחברות
+          </button>
+          <button
+            style={authMode === "signup" ? styles.buttonPrimary : styles.button}
+            onClick={() => onModeChange("signup")}
+          >
+            הרשמה
+          </button>
+        </div>
+
+        <div style={styles.formGrid}>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={styles.label}>אימייל</label>
+            <input
+              style={styles.input}
+              type="email"
+              value={email}
+              onChange={(e) => onEmailChange(e.target.value)}
+            />
+          </div>
+          <div style={{ gridColumn: "1 / -1" }}>
+            <label style={styles.label}>סיסמה</label>
+            <input
+              style={styles.input}
+              type="password"
+              value={password}
+              onChange={(e) => onPasswordChange(e.target.value)}
+            />
+          </div>
+        </div>
+
+        <div style={styles.buttonRow}>
+          <button style={styles.buttonPrimary} onClick={onSubmit}>
+            {authMode === "signup" ? "צור משתמש" : "התחבר"}
+          </button>
+        </div>
+
+        <div style={styles.divider}>
+          <span style={styles.dividerText}>או</span>
+        </div>
+
+        <button style={styles.buttonGoogle} onClick={onGoogleLogin}>
+          <span style={{ marginLeft: "8px", fontWeight: 900 }}>G</span>
+          התחבר עם Google
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Vehicle Profile Form ─────────────────────────────────────────────────────
+
+type VehicleProfileFormProps = {
+  vehicleForm: VehicleFormState;
+  profile: Profile | null;
+  loading: boolean;
+  onFieldChange: (field: keyof VehicleFormState, value: string) => void;
+  onSave: () => void;
+};
+
+function VehicleProfileForm({
+  vehicleForm,
+  profile,
+  loading,
+  onFieldChange,
+  onSave,
+}: VehicleProfileFormProps) {
+  return (
+    <div style={styles.card}>
+      <h2 style={styles.sectionTitle}>פרטי הרכב</h2>
+
+      {loading ? (
+        <div>טוען פרטי רכב...</div>
+      ) : (
+        <>
+          <div style={styles.formGrid}>
+            <div>
+              <label style={styles.label}>יצרן</label>
+              <input
+                style={styles.input}
+                type="text"
+                value={vehicleForm.manufacturer}
+                onChange={(e) => onFieldChange("manufacturer", e.target.value)}
+              />
+            </div>
+            <div>
+              <label style={styles.label}>דגם</label>
+              <input
+                style={styles.input}
+                type="text"
+                value={vehicleForm.model}
+                onChange={(e) => onFieldChange("model", e.target.value)}
+              />
+            </div>
+            <div>
+              <label style={styles.label}>שנה</label>
+              <input
+                style={styles.input}
+                type="number"
+                value={vehicleForm.year}
+                onChange={(e) => onFieldChange("year", e.target.value)}
+              />
+            </div>
+          </div>
+
+          <div style={styles.buttonRow}>
+            <button style={styles.buttonPrimary} onClick={onSave}>
+              שמור פרטי רכב
+            </button>
+          </div>
+
+          <div style={styles.vehicleBox}>
+            {profile?.manufacturer && profile?.model && profile?.year
+              ? `הרכב השמור שלך: ${profile.manufacturer} ${profile.model} ${profile.year}`
+              : "עדיין לא שמרת פרטי רכב. צריך לשמור כדי להתחיל להוסיף תדלוקים."}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ─── Fuel Entry Form ──────────────────────────────────────────────────────────
+
+type FuelEntryFormProps = {
+  form: FuelFormState;
+  onFieldChange: (field: keyof FuelFormState, value: string) => void;
+  onSave: () => void;
+};
+
+function FuelEntryForm({ form, onFieldChange, onSave }: FuelEntryFormProps) {
+  return (
+    <div style={styles.card}>
+      <h2 style={styles.sectionTitle}>הוספת תדלוק</h2>
+
+      <div style={styles.formGrid}>
+        <div>
+          <label style={styles.label}>תאריך</label>
+          <input
+            style={styles.input}
+            type="date"
+            value={form.date}
+            onChange={(e) => onFieldChange("date", e.target.value)}
+          />
+        </div>
+        <div>
+          <label style={styles.label}>כמות דלק (ליטרים)</label>
+          <input
+            style={styles.input}
+            type="number"
+            step="0.01"
+            value={form.liters}
+            onChange={(e) => onFieldChange("liters", e.target.value)}
+          />
+        </div>
+        <div>
+          <label style={styles.label}>מחיר כולל</label>
+          <input
+            style={styles.input}
+            type="number"
+            step="0.01"
+            value={form.totalPrice}
+            onChange={(e) => onFieldChange("totalPrice", e.target.value)}
+          />
+        </div>
+        <div>
+          <label style={styles.label}>קילומטראז׳</label>
+          <input
+            style={styles.input}
+            type="number"
+            step="1"
+            value={form.odometer}
+            onChange={(e) => onFieldChange("odometer", e.target.value)}
+          />
+        </div>
+        <div>
+          <label style={styles.label}>סוג דלק</label>
+          <select
+            style={styles.input}
+            value={form.fuelType}
+            onChange={(e) => onFieldChange("fuelType", e.target.value)}
+          >
+            <option>בנזין 95</option>
+            <option>בנזין 98</option>
+            <option>סולר</option>
+            <option>אחר</option>
+          </select>
+        </div>
+        <div>
+          <label style={styles.label}>תחנת דלק</label>
+          <input
+            style={styles.input}
+            type="text"
+            value={form.station}
+            onChange={(e) => onFieldChange("station", e.target.value)}
+          />
+        </div>
+        <div style={{ gridColumn: "1 / -1" }}>
+          <label style={styles.label}>הערות</label>
+          <input
+            style={styles.input}
+            type="text"
+            value={form.notes}
+            onChange={(e) => onFieldChange("notes", e.target.value)}
+          />
+        </div>
+      </div>
+
+      <div style={styles.buttonRow}>
+        <button style={styles.buttonPrimary} onClick={onSave}>
+          שמור תדלוק
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Entries Table ────────────────────────────────────────────────────────────
+
+type EntriesTableProps = {
+  enriched: EnrichedFuelEntry[];
+  loading: boolean;
+  onDelete: (id: string) => void;
+};
+
+const TABLE_HEADERS = [
+  "תאריך",
+  "ליטרים",
+  "מחיר כולל",
+  "מחיר לליטר",
+  "קילומטראז׳",
+  "סוג דלק",
+  "תחנה",
+  "מרחק קודם",
+  "ימים",
+  'ק"מ לליטר',
+  "ליטר ל-100",
+  'עלות לק"מ',
+  'ק"מ ליום',
+  "עלות ליום",
+  "מחיקה",
+];
+
+function EntriesTable({ enriched, loading, onDelete }: EntriesTableProps) {
+  return (
+    <div style={styles.card}>
+      <h2 style={styles.sectionTitle}>פירוט כל התדלוקים</h2>
+
+      {loading ? (
+        <div>טוען נתונים...</div>
+      ) : (
+        <div style={{ overflowX: "auto" }}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                {TABLE_HEADERS.map((h) => (
+                  <th key={h} style={styles.th}>
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {enriched.length === 0 ? (
+                <tr>
+                  <td style={styles.td} colSpan={TABLE_HEADERS.length}>
+                    עדיין אין נתונים
+                  </td>
+                </tr>
+              ) : (
+                enriched.map((entry) => (
+                  <tr key={entry.id}>
+                    <td style={styles.td}>{entry.date}</td>
+                    <td style={styles.td}>{formatNumber(entry.liters)}</td>
+                    <td style={styles.td}>{formatCurrency(entry.total_price)}</td>
+                    <td style={styles.td}>{formatCurrency(entry.pricePerLiter)}</td>
+                    <td style={styles.td}>{formatNumber(entry.odometer, 0)}</td>
+                    <td style={styles.td}>{entry.fuel_type || "-"}</td>
+                    <td style={styles.td}>{entry.station || "-"}</td>
+                    <td style={styles.td}>
+                      {formatNumber(entry.distanceFromPrev, 0)}
+                    </td>
+                    <td style={styles.td}>
+                      {formatNumber(entry.daysFromPrev, 0)}
+                    </td>
+                    <td style={styles.td}>{formatNumber(entry.kmPerLiter)}</td>
+                    <td style={styles.td}>
+                      {formatNumber(entry.litersPer100Km)}
+                    </td>
+                    <td style={styles.td}>{formatCurrency(entry.costPerKm)}</td>
+                    <td style={styles.td}>{formatNumber(entry.kmPerDay)}</td>
+                    <td style={styles.td}>{formatCurrency(entry.costPerDay)}</td>
+                    <td style={styles.td}>
+                      <button
+                        style={styles.deleteSmall}
+                        onClick={() => onDelete(entry.id)}
+                      >
+                        מחק
+                      </button>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main App ─────────────────────────────────────────────────────────────────
+
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -72,21 +570,15 @@ export default function App() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
-  const [vehicleForm, setVehicleForm] = useState({
+  const [vehicleForm, setVehicleForm] = useState<VehicleFormState>({
     manufacturer: "",
     model: "",
     year: "",
   });
 
-  const [form, setForm] = useState({
-    date: todayValue(),
-    liters: "",
-    totalPrice: "",
-    odometer: "",
-    fuelType: "בנזין 95",
-    station: "",
-    notes: "",
-  });
+  const [fuelForm, setFuelForm] = useState<FuelFormState>(defaultFuelForm());
+
+  // ── Auth listener ──
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -113,6 +605,8 @@ export default function App() {
     }
   }, [session]);
 
+  // ── Data loaders ──
+
   async function loadProfile(userId: string, userEmail: string | null) {
     setLoadingProfile(true);
 
@@ -131,24 +625,23 @@ export default function App() {
 
     if (!data) {
       setProfile(null);
-      setVehicleForm({
-        manufacturer: "",
-        model: "",
-        year: "",
-      });
+      setVehicleForm({ manufacturer: "", model: "", year: "" });
       return;
     }
 
-    const loadedProfile = data as Profile;
-    setProfile(loadedProfile);
+    const loaded = data as Profile;
+    setProfile(loaded);
     setVehicleForm({
-      manufacturer: loadedProfile.manufacturer ?? "",
-      model: loadedProfile.model ?? "",
-      year: loadedProfile.year ? String(loadedProfile.year) : "",
+      manufacturer: loaded.manufacturer ?? "",
+      model: loaded.model ?? "",
+      year: loaded.year ? String(loaded.year) : "",
     });
 
-    if (!loadedProfile.email && userEmail) {
-      await supabase.from("profiles").update({ email: userEmail }).eq("id", userId);
+    if (!loaded.email && userEmail) {
+      await supabase
+        .from("profiles")
+        .update({ email: userEmail })
+        .eq("id", userId);
     }
   }
 
@@ -172,6 +665,8 @@ export default function App() {
     setEntries((data ?? []) as FuelEntry[]);
   }
 
+  // ── Auth actions ──
+
   async function handleAuth() {
     if (!email || !password) {
       alert("מלא אימייל וסיסמה");
@@ -179,16 +674,11 @@ export default function App() {
     }
 
     if (authMode === "signup") {
-      const { error } = await supabase.auth.signUp({
-        email,
-        password,
-      });
-
+      const { error } = await supabase.auth.signUp({ email, password });
       if (error) {
         alert(error.message);
         return;
       }
-
       alert("המשתמש נוצר. אם נשלח מייל אימות, צריך לאשר אותו.");
       return;
     }
@@ -197,7 +687,16 @@ export default function App() {
       email,
       password,
     });
+    if (error) {
+      alert(error.message);
+    }
+  }
 
+  async function handleGoogleLogin() {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: window.location.origin },
+    });
     if (error) {
       alert(error.message);
     }
@@ -207,7 +706,9 @@ export default function App() {
     await supabase.auth.signOut();
   }
 
-  function updateVehicleForm(field: string, value: string) {
+  // ── Vehicle profile actions ──
+
+  function updateVehicleForm(field: keyof VehicleFormState, value: string) {
     setVehicleForm((prev) => ({ ...prev, [field]: value }));
   }
 
@@ -245,133 +746,25 @@ export default function App() {
     alert("פרטי הרכב נשמרו");
   }
 
-  const sortedEntries = useMemo(() => {
-    return [...entries].sort((a, b) => {
-      const dateDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
-      if (dateDiff !== 0) return dateDiff;
-      return a.odometer - b.odometer;
-    });
-  }, [entries]);
+  // ── Fuel entry actions ──
 
-  const enrichedEntries = useMemo<EnrichedFuelEntry[]>(() => {
-    return sortedEntries.map((entry, index) => {
-      const prev = sortedEntries[index - 1];
-      const pricePerLiter = entry.total_price / entry.liters;
-
-      const daysFromPrev =
-        prev !== undefined
-          ? Math.round(
-              (new Date(entry.date).getTime() - new Date(prev.date).getTime()) /
-                (1000 * 60 * 60 * 24)
-            )
-          : null;
-
-      const distanceFromPrev =
-        prev !== undefined ? entry.odometer - prev.odometer : null;
-
-      const kmPerLiter =
-        prev !== undefined &&
-        distanceFromPrev !== null &&
-        distanceFromPrev > 0 &&
-        entry.liters > 0
-          ? distanceFromPrev / entry.liters
-          : null;
-
-      const litersPer100Km =
-        prev !== undefined &&
-        distanceFromPrev !== null &&
-        distanceFromPrev > 0 &&
-        entry.liters > 0
-          ? (entry.liters / distanceFromPrev) * 100
-          : null;
-
-      const costPerKm =
-        prev !== undefined &&
-        distanceFromPrev !== null &&
-        distanceFromPrev > 0
-          ? entry.total_price / distanceFromPrev
-          : null;
-
-      const costPerDay =
-        prev !== undefined &&
-        daysFromPrev !== null &&
-        daysFromPrev > 0
-          ? entry.total_price / daysFromPrev
-          : null;
-
-      const kmPerDay =
-        prev !== undefined &&
-        daysFromPrev !== null &&
-        daysFromPrev > 0 &&
-        distanceFromPrev !== null &&
-        distanceFromPrev > 0
-          ? distanceFromPrev / daysFromPrev
-          : null;
-
-      return {
-        ...entry,
-        pricePerLiter,
-        daysFromPrev,
-        distanceFromPrev,
-        kmPerLiter,
-        litersPer100Km,
-        costPerKm,
-        costPerDay,
-        kmPerDay,
-      };
-    });
-  }, [sortedEntries]);
-
-  const totals = useMemo(() => {
-    const totalLiters = enrichedEntries.reduce((sum, e) => sum + e.liters, 0);
-    const totalCost = enrichedEntries.reduce((sum, e) => sum + e.total_price, 0);
-
-    let totalDistance = 0;
-    let totalDays = 0;
-
-    for (const e of enrichedEntries) {
-      if (e.distanceFromPrev !== null && e.distanceFromPrev > 0) {
-        totalDistance += e.distanceFromPrev;
-      }
-
-      if (e.daysFromPrev !== null && e.daysFromPrev > 0) {
-        totalDays += e.daysFromPrev;
-      }
-    }
-
-    return {
-      totalLiters,
-      totalCost,
-      totalDistance,
-      avgPricePerLiter: totalLiters > 0 ? totalCost / totalLiters : null,
-      avgKmPerLiter:
-        totalLiters > 0 && totalDistance > 0 ? totalDistance / totalLiters : null,
-      avgLitersPer100Km:
-        totalDistance > 0 && totalLiters > 0
-          ? (totalLiters / totalDistance) * 100
-          : null,
-      avgCostPerKm: totalDistance > 0 ? totalCost / totalDistance : null,
-      avgKmPerDay: totalDays > 0 ? totalDistance / totalDays : null,
-      avgCostPerDay: totalDays > 0 ? totalCost / totalDays : null,
-    };
-  }, [enrichedEntries]);
-
-  function updateForm(field: string, value: string) {
-    setForm((prev) => ({ ...prev, [field]: value }));
+  function updateFuelForm(field: keyof FuelFormState, value: string) {
+    setFuelForm((prev) => ({ ...prev, [field]: value }));
   }
 
   async function addEntry() {
     if (!session?.user?.id) return;
+
     if (!profile?.manufacturer || !profile?.model || !profile?.year) {
       alert("צריך קודם לשמור את פרטי הרכב");
       return;
     }
 
-    const liters = Number(form.liters);
-    const totalPrice = Number(form.totalPrice);
-    const odometer = Number(form.odometer);
+    const liters = Number(fuelForm.liters);
+    const totalPrice = Number(fuelForm.totalPrice);
+    const odometer = Number(fuelForm.odometer);
 
-    if (!form.date || !liters || !totalPrice || !odometer) {
+    if (!fuelForm.date || !liters || !totalPrice || !odometer) {
       alert("צריך למלא תאריך, ליטרים, מחיר וקילומטראז׳");
       return;
     }
@@ -384,13 +777,13 @@ export default function App() {
 
     const { error } = await supabase.from("fuel_entries").insert({
       user_id: session.user.id,
-      date: form.date,
+      date: fuelForm.date,
       liters,
       total_price: totalPrice,
       odometer,
-      fuel_type: form.fuelType,
-      station: form.station,
-      notes: form.notes,
+      fuel_type: fuelForm.fuelType,
+      station: fuelForm.station,
+      notes: fuelForm.notes,
     });
 
     if (error) {
@@ -398,21 +791,15 @@ export default function App() {
       return;
     }
 
-    setForm({
-      date: todayValue(),
-      liters: "",
-      totalPrice: "",
-      odometer: "",
-      fuelType: "בנזין 95",
-      station: "",
-      notes: "",
-    });
-
+    setFuelForm(defaultFuelForm());
     await loadEntries(session.user.id);
   }
 
   async function deleteEntry(id: string) {
-    const { error } = await supabase.from("fuel_entries").delete().eq("id", id);
+    const { error } = await supabase
+      .from("fuel_entries")
+      .delete()
+      .eq("id", id);
 
     if (error) {
       alert(error.message);
@@ -424,64 +811,49 @@ export default function App() {
     }
   }
 
-  if (loadingAuth) {
-    return <div style={styles.centered}>טוען...</div>;
-  }
+  // ── Derived data ──
+
+  const sortedEntries = useMemo(
+    () =>
+      [...entries].sort((a, b) => {
+        const dateDiff =
+          new Date(a.date).getTime() - new Date(b.date).getTime();
+        if (dateDiff !== 0) return dateDiff;
+        return a.odometer - b.odometer;
+      }),
+    [entries]
+  );
+
+  const enrichedEntries = useMemo(
+    () => enrichEntries(sortedEntries),
+    [sortedEntries]
+  );
+
+  const totals = useMemo(() => calcTotals(enrichedEntries), [enrichedEntries]);
+
+  const lastOdometer =
+    sortedEntries.length > 0
+      ? sortedEntries[sortedEntries.length - 1].odometer
+      : null;
+
+  // ── Render ──
+
+  if (loadingAuth) return <LoadingScreen />;
 
   if (!session) {
     return (
-      <div style={styles.page} dir="rtl">
-        <div style={styles.authCard}>
-          <h1 style={styles.title}>כניסה לאתר</h1>
-          <p style={styles.subtitle}>צור משתמש עם אימייל וסיסמה, או התחבר אם כבר נרשמת.</p>
-
-          <div style={styles.authTabs}>
-            <button
-              style={authMode === "login" ? styles.buttonPrimary : styles.button}
-              onClick={() => setAuthMode("login")}
-            >
-              התחברות
-            </button>
-            <button
-              style={authMode === "signup" ? styles.buttonPrimary : styles.button}
-              onClick={() => setAuthMode("signup")}
-            >
-              הרשמה
-            </button>
-          </div>
-
-          <div style={styles.formGrid}>
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={styles.label}>אימייל</label>
-              <input
-                style={styles.input}
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={styles.label}>סיסמה</label>
-              <input
-                style={styles.input}
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-          </div>
-
-          <button style={styles.buttonPrimary} onClick={handleAuth}>
-            {authMode === "signup" ? "צור משתמש" : "התחבר"}
-          </button>
-        </div>
-      </div>
+      <AuthScreen
+        authMode={authMode}
+        email={email}
+        password={password}
+        onModeChange={setAuthMode}
+        onEmailChange={setEmail}
+        onPasswordChange={setPassword}
+        onSubmit={handleAuth}
+        onGoogleLogin={handleGoogleLogin}
+      />
     );
   }
-
-  const lastOdometer =
-    sortedEntries.length > 0 ? sortedEntries[sortedEntries.length - 1].odometer : null;
 
   return (
     <div style={styles.page} dir="rtl">
@@ -496,249 +868,77 @@ export default function App() {
           </button>
         </div>
 
-        <div style={styles.card}>
-          <h2 style={styles.sectionTitle}>פרטי הרכב</h2>
-
-          {loadingProfile ? (
-            <div>טוען פרטי רכב...</div>
-          ) : (
-            <>
-              <div style={styles.formGrid}>
-                <div>
-                  <label style={styles.label}>יצרן</label>
-                  <input
-                    style={styles.input}
-                    type="text"
-                    value={vehicleForm.manufacturer}
-                    onChange={(e) => updateVehicleForm("manufacturer", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={styles.label}>דגם</label>
-                  <input
-                    style={styles.input}
-                    type="text"
-                    value={vehicleForm.model}
-                    onChange={(e) => updateVehicleForm("model", e.target.value)}
-                  />
-                </div>
-
-                <div>
-                  <label style={styles.label}>שנה</label>
-                  <input
-                    style={styles.input}
-                    type="number"
-                    value={vehicleForm.year}
-                    onChange={(e) => updateVehicleForm("year", e.target.value)}
-                  />
-                </div>
-              </div>
-
-              <div style={styles.buttonRow}>
-                <button style={styles.buttonPrimary} onClick={saveVehicleProfile}>
-                  שמור פרטי רכב
-                </button>
-              </div>
-
-              {profile?.manufacturer && profile?.model && profile?.year ? (
-                <div style={styles.vehicleBox}>
-                  הרכב השמור שלך: {profile.manufacturer} {profile.model} {profile.year}
-                </div>
-              ) : (
-                <div style={styles.vehicleBox}>
-                  עדיין לא שמרת פרטי רכב. צריך לשמור כדי להתחיל להשוות בעתיד לממוצע.
-                </div>
-              )}
-            </>
-          )}
-        </div>
+        <VehicleProfileForm
+          vehicleForm={vehicleForm}
+          profile={profile}
+          loading={loadingProfile}
+          onFieldChange={updateVehicleForm}
+          onSave={saveVehicleProfile}
+        />
 
         <div style={styles.infoBox}>
-          קילומטראז׳ אחרון: {lastOdometer ? formatNumber(lastOdometer, 0) : "-"} ק"מ
+          קילומטראז׳ אחרון:{" "}
+          {lastOdometer !== null ? formatNumber(lastOdometer, 0) : "-"} ק"מ
         </div>
 
-        <div style={styles.card}>
-          <h2 style={styles.sectionTitle}>הוספת תדלוק</h2>
-
-          <div style={styles.formGrid}>
-            <div>
-              <label style={styles.label}>תאריך</label>
-              <input
-                style={styles.input}
-                type="date"
-                value={form.date}
-                onChange={(e) => updateForm("date", e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label style={styles.label}>כמות דלק בליטרים</label>
-              <input
-                style={styles.input}
-                type="number"
-                step="0.01"
-                value={form.liters}
-                onChange={(e) => updateForm("liters", e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label style={styles.label}>מחיר כולל</label>
-              <input
-                style={styles.input}
-                type="number"
-                step="0.01"
-                value={form.totalPrice}
-                onChange={(e) => updateForm("totalPrice", e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label style={styles.label}>קילומטראז׳</label>
-              <input
-                style={styles.input}
-                type="number"
-                step="1"
-                value={form.odometer}
-                onChange={(e) => updateForm("odometer", e.target.value)}
-              />
-            </div>
-
-            <div>
-              <label style={styles.label}>סוג דלק</label>
-              <select
-                style={styles.input}
-                value={form.fuelType}
-                onChange={(e) => updateForm("fuelType", e.target.value)}
-              >
-                <option>בנזין 95</option>
-                <option>בנזין 98</option>
-                <option>סולר</option>
-                <option>אחר</option>
-              </select>
-            </div>
-
-            <div>
-              <label style={styles.label}>תחנת דלק</label>
-              <input
-                style={styles.input}
-                type="text"
-                value={form.station}
-                onChange={(e) => updateForm("station", e.target.value)}
-              />
-            </div>
-
-            <div style={{ gridColumn: "1 / -1" }}>
-              <label style={styles.label}>הערות</label>
-              <input
-                style={styles.input}
-                type="text"
-                value={form.notes}
-                onChange={(e) => updateForm("notes", e.target.value)}
-              />
-            </div>
-          </div>
-
-          <div style={styles.buttonRow}>
-            <button style={styles.buttonPrimary} onClick={addEntry}>
-              שמור תדלוק
-            </button>
-          </div>
-        </div>
+        {profile?.manufacturer && profile?.model && profile?.year && (
+          <FuelEntryForm
+            form={fuelForm}
+            onFieldChange={updateFuelForm}
+            onSave={addEntry}
+          />
+        )}
 
         <div style={styles.statsGrid}>
-          <StatCard title='סה"כ ליטרים' value={`${formatNumber(totals.totalLiters)} ל׳`} />
-          <StatCard title='סה"כ עלות' value={formatCurrency(totals.totalCost)} />
-          <StatCard title='סה"כ מרחק' value={`${formatNumber(totals.totalDistance)} ק"מ`} />
-          <StatCard title='ממוצע ק"מ לליטר' value={formatNumber(totals.avgKmPerLiter)} />
-          <StatCard title='ממוצע ליטר ל-100 ק"מ' value={formatNumber(totals.avgLitersPer100Km)} />
-          <StatCard title='ממוצע מחיר לליטר' value={formatCurrency(totals.avgPricePerLiter)} />
-          <StatCard title='ממוצע עלות לק"מ' value={formatCurrency(totals.avgCostPerKm)} />
-          <StatCard title='ממוצע ק"מ ליום' value={formatNumber(totals.avgKmPerDay)} />
-          <StatCard title='ממוצע עלות ליום' value={formatCurrency(totals.avgCostPerDay)} />
+          <StatCard
+            title='סה"כ ליטרים'
+            value={`${formatNumber(totals.totalLiters)} ל׳`}
+          />
+          <StatCard
+            title='סה"כ עלות'
+            value={formatCurrency(totals.totalCost)}
+          />
+          <StatCard
+            title='סה"כ מרחק'
+            value={`${formatNumber(totals.totalDistance)} ק"מ`}
+          />
+          <StatCard
+            title='ממוצע ק"מ לליטר'
+            value={formatNumber(totals.avgKmPerLiter)}
+          />
+          <StatCard
+            title='ממוצע ליטר ל-100 ק"מ'
+            value={formatNumber(totals.avgLitersPer100Km)}
+          />
+          <StatCard
+            title="ממוצע מחיר לליטר"
+            value={formatCurrency(totals.avgPricePerLiter)}
+          />
+          <StatCard
+            title='ממוצע עלות לק"מ'
+            value={formatCurrency(totals.avgCostPerKm)}
+          />
+          <StatCard
+            title='ממוצע ק"מ ליום'
+            value={formatNumber(totals.avgKmPerDay)}
+          />
+          <StatCard
+            title="ממוצע עלות ליום"
+            value={formatCurrency(totals.avgCostPerDay)}
+          />
         </div>
 
-        <div style={styles.card}>
-          <h2 style={styles.sectionTitle}>פירוט כל התדלוקים</h2>
-
-          {loadingEntries ? (
-            <div>טוען נתונים...</div>
-          ) : (
-            <div style={{ overflowX: "auto" }}>
-              <table style={styles.table}>
-                <thead>
-                  <tr>
-                    <th style={styles.th}>תאריך</th>
-                    <th style={styles.th}>ליטרים</th>
-                    <th style={styles.th}>מחיר כולל</th>
-                    <th style={styles.th}>מחיר לליטר</th>
-                    <th style={styles.th}>קילומטראז׳</th>
-                    <th style={styles.th}>סוג דלק</th>
-                    <th style={styles.th}>תחנה</th>
-                    <th style={styles.th}>מרחק קודם</th>
-                    <th style={styles.th}>ימים</th>
-                    <th style={styles.th}>ק"מ לליטר</th>
-                    <th style={styles.th}>ליטר ל-100</th>
-                    <th style={styles.th}>עלות לק"מ</th>
-                    <th style={styles.th}>ק"מ ליום</th>
-                    <th style={styles.th}>עלות ליום</th>
-                    <th style={styles.th}>מחיקה</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {enrichedEntries.length === 0 ? (
-                    <tr>
-                      <td style={styles.td} colSpan={15}>
-                        עדיין אין נתונים
-                      </td>
-                    </tr>
-                  ) : (
-                    enrichedEntries.map((entry) => (
-                      <tr key={entry.id}>
-                        <td style={styles.td}>{entry.date}</td>
-                        <td style={styles.td}>{formatNumber(entry.liters)}</td>
-                        <td style={styles.td}>{formatCurrency(entry.total_price)}</td>
-                        <td style={styles.td}>{formatCurrency(entry.pricePerLiter)}</td>
-                        <td style={styles.td}>{formatNumber(entry.odometer, 0)}</td>
-                        <td style={styles.td}>{entry.fuel_type || "-"}</td>
-                        <td style={styles.td}>{entry.station || "-"}</td>
-                        <td style={styles.td}>{formatNumber(entry.distanceFromPrev, 0)}</td>
-                        <td style={styles.td}>{formatNumber(entry.daysFromPrev, 0)}</td>
-                        <td style={styles.td}>{formatNumber(entry.kmPerLiter)}</td>
-                        <td style={styles.td}>{formatNumber(entry.litersPer100Km)}</td>
-                        <td style={styles.td}>{formatCurrency(entry.costPerKm)}</td>
-                        <td style={styles.td}>{formatNumber(entry.kmPerDay)}</td>
-                        <td style={styles.td}>{formatCurrency(entry.costPerDay)}</td>
-                        <td style={styles.td}>
-                          <button
-                            style={styles.deleteSmall}
-                            onClick={() => deleteEntry(entry.id)}
-                          >
-                            מחק
-                          </button>
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <EntriesTable
+          enriched={enrichedEntries}
+          loading={loadingEntries}
+          onDelete={deleteEntry}
+        />
       </div>
     </div>
   );
 }
 
-function StatCard({ title, value }: { title: string; value: string }) {
-  return (
-    <div style={styles.statCard}>
-      <div style={styles.statTitle}>{title}</div>
-      <div style={styles.statValue}>{value}</div>
-    </div>
-  );
-}
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles: Record<string, React.CSSProperties> = {
   page: {
@@ -777,10 +977,12 @@ const styles: Record<string, React.CSSProperties> = {
   title: {
     fontSize: "32px",
     marginBottom: "8px",
+    marginTop: 0,
   },
   subtitle: {
     color: "#4b5563",
     marginBottom: "16px",
+    marginTop: 0,
   },
   infoBox: {
     background: "#e5e7eb",
@@ -862,6 +1064,31 @@ const styles: Record<string, React.CSSProperties> = {
     borderRadius: "10px",
     cursor: "pointer",
     fontSize: "15px",
+  },
+  buttonGoogle: {
+    width: "100%",
+    background: "#ffffff",
+    color: "#111827",
+    border: "1px solid #d1d5db",
+    padding: "10px 16px",
+    borderRadius: "10px",
+    cursor: "pointer",
+    fontSize: "15px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    fontWeight: 700,
+    gap: "8px",
+  },
+  divider: {
+    display: "flex",
+    alignItems: "center",
+    margin: "16px 0",
+  },
+  dividerText: {
+    color: "#9ca3af",
+    fontSize: "14px",
+    margin: "0 auto",
   },
   statsGrid: {
     display: "grid",
