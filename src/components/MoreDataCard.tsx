@@ -42,6 +42,10 @@ type MoreDataCardProps = {
     fuelCalendarNoData: string;
     fuelCalendarRefuels: string;
     fuelCalendarDistance: string;
+    whereFueled: string;
+    openFuelMap: string;
+    fuelMapTitle: string;
+    noFuelLocations: string;
   };
   settings: UserSettings;
   totals: Totals;
@@ -86,6 +90,44 @@ export function MoreDataCard({
     const base = latestDate ? new Date(`${latestDate}T00:00:00`) : new Date();
     return new Date(base.getFullYear(), base.getMonth(), 1);
   });
+  const [showFuelMap, setShowFuelMap] = useState(false);
+
+  const locationQueries = useMemo(() => {
+    const regex = /(-?\d{1,3}(?:\.\d+)?)\s*,\s*(-?\d{1,3}(?:\.\d+)?)/;
+    const points: string[] = [];
+
+    for (const entry of entries) {
+      const station = String(entry.station ?? "").trim();
+      if (!station) continue;
+
+      const match = station.match(regex);
+      if (match) {
+        const lat = Number(match[1]);
+        const lon = Number(match[2]);
+        if (
+          Number.isFinite(lat) &&
+          Number.isFinite(lon) &&
+          lat >= -90 &&
+          lat <= 90 &&
+          lon >= -180 &&
+          lon <= 180
+        ) {
+          points.push(`${lat},${lon}`);
+          continue;
+        }
+      }
+
+      points.push(station);
+    }
+
+    return Array.from(new Set(points));
+  }, [entries]);
+
+  const mapEmbedSrc = useMemo(() => {
+    if (locationQueries.length === 0) return "";
+    const joined = locationQueries.slice(0, 25).join(" | ");
+    return `https://www.google.com/maps?q=${encodeURIComponent(joined)}&z=9&output=embed`;
+  }, [locationQueries]);
 
   const calendarDataByDate = useMemo(() => {
     const byDate = new Map<string, { refuels: number; distance: number }>();
@@ -150,7 +192,47 @@ export function MoreDataCard({
         <button style={styles.buttonPrimary} onClick={onExport}>
           {labels.exportExcel}
         </button>
+        <button
+          style={styles.button}
+          onClick={() => setShowFuelMap((current) => !current)}
+        >
+          {labels.openFuelMap}
+        </button>
       </div>
+
+      {showFuelMap ? (
+        <div style={{ ...styles.detailCard, marginBottom: "10px" }}>
+          <div style={styles.detailLabel}>{labels.fuelMapTitle}</div>
+          {locationQueries.length === 0 ? (
+            <div style={styles.detailValue}>{labels.noFuelLocations}</div>
+          ) : (
+            <>
+              <iframe
+                title={labels.whereFueled}
+                src={mapEmbedSrc}
+                loading="lazy"
+                referrerPolicy="no-referrer-when-downgrade"
+                style={styles.fuelMapEmbed}
+              />
+              <div style={styles.fuelMapLinks}>
+                {locationQueries.slice(0, 25).map((query, index) => (
+                  <a
+                    key={`${query}-${index}`}
+                    href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                      query
+                    )}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={styles.fuelMapLink}
+                  >
+                    {query}
+                  </a>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
+      ) : null}
 
       <div style={styles.moreDataGrid}>
         <div style={styles.detailCard}>
