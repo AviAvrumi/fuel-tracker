@@ -1,0 +1,525 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>עוזר להצבת משולש אזהרה</title>
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <style>
+      :root {
+        --text: #172036;
+        --muted: #5e6b84;
+        --ok: #0f9f58;
+        --warn: #c67c0e;
+        --danger: #c23f3f;
+        --panel: rgba(255, 255, 255, 0.96);
+        --blue: #2058e7;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        font-family: "Segoe UI", Tahoma, Arial, sans-serif;
+        color: var(--text);
+      }
+
+      .app {
+        position: relative;
+        width: 100%;
+        height: 100dvh;
+        background: #dbe3f5;
+      }
+
+      #map {
+        position: absolute;
+        inset: 0;
+      }
+
+      .top-panel {
+        position: absolute;
+        top: calc(10px + env(safe-area-inset-top));
+        left: 10px;
+        right: 10px;
+        z-index: 700;
+        background: var(--panel);
+        border: 1px solid #d4dced;
+        border-radius: 14px;
+        padding: 10px;
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.14);
+        backdrop-filter: blur(5px);
+      }
+
+      .top-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+      .top-actions {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 0.95rem;
+        font-weight: 700;
+      }
+
+      .help-btn {
+        border: 0;
+        border-radius: 999px;
+        width: 28px;
+        height: 28px;
+        background: #edf3ff;
+        color: #1f4bb8;
+        font-size: 0.9rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .nav-btn {
+        border: 0;
+        border-radius: 999px;
+        height: 28px;
+        padding: 0 10px;
+        background: #e9f0ff;
+        color: #1f4bb8;
+        font-size: 0.73rem;
+        font-weight: 700;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+      }
+
+      .badge {
+        display: inline-block;
+        margin-top: 7px;
+        padding: 2px 8px;
+        border-radius: 999px;
+        font-size: 0.73rem;
+        font-weight: 700;
+      }
+
+      .ok {
+        color: var(--ok);
+        background: #e8f9ef;
+      }
+
+      .warn {
+        color: var(--warn);
+        background: #fff5e6;
+      }
+
+      .danger {
+        color: var(--danger);
+        background: #ffeaea;
+      }
+
+      .instruction {
+        margin-top: 6px;
+        font-size: 0.84rem;
+        line-height: 1.3;
+        font-weight: 600;
+      }
+
+      .metrics {
+        margin-top: 7px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 4px 10px;
+      }
+
+      .metric {
+        display: flex;
+        justify-content: space-between;
+        gap: 8px;
+        font-size: 0.77rem;
+        color: var(--muted);
+      }
+
+      .metric strong {
+        color: var(--text);
+      }
+
+      .bottom-bar {
+        position: absolute;
+        left: 10px;
+        right: 10px;
+        bottom: calc(10px + env(safe-area-inset-bottom));
+        z-index: 700;
+      }
+
+      .main-btn {
+        width: 100%;
+        border: 0;
+        border-radius: 14px;
+        min-height: 52px;
+        background: linear-gradient(135deg, #1b58eb, #2e70ff);
+        color: #fff;
+        font-size: 0.95rem;
+        font-weight: 700;
+        cursor: pointer;
+        box-shadow: 0 10px 24px rgba(32, 88, 231, 0.35);
+      }
+
+      .emoji-marker {
+        font-size: 30px;
+        line-height: 1;
+        transform: translate(-4px, -8px);
+        filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.3));
+      }
+
+      dialog {
+        width: min(92vw, 420px);
+        border: 0;
+        border-radius: 14px;
+        padding: 14px;
+        box-shadow: 0 20px 45px rgba(0, 0, 0, 0.32);
+        color: var(--text);
+      }
+
+      dialog::backdrop {
+        background: rgba(0, 0, 0, 0.34);
+      }
+
+      .help-title {
+        margin: 0 0 8px;
+        font-size: 0.98rem;
+      }
+
+      .help-text {
+        margin: 0;
+        font-size: 0.86rem;
+        line-height: 1.5;
+      }
+
+      .close-btn {
+        margin-top: 12px;
+        border: 0;
+        border-radius: 10px;
+        padding: 8px 12px;
+        background: #edf2ff;
+        color: #1f4bb8;
+        font-weight: 700;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app">
+      <div id="map" aria-label="מפת מיקום המשולש"></div>
+
+      <section class="top-panel">
+        <div class="top-head">
+          <h1>הצבת משולש</h1>
+          <div class="top-actions">
+            <a class="nav-btn" href="/stopping-distance.html">מרחק עצירה</a>
+            <a class="nav-btn" href="/emergency-brake-drill.html">תרגול בלימה</a>
+            <button id="helpBtn" class="help-btn" type="button">?</button>
+          </div>
+        </div>
+        <span id="statusBadge" class="badge warn">ממתין ל-GPS</span>
+        <div id="instruction" class="instruction">לחצו על הכפתור למטה להפעלת GPS.</div>
+
+        <div class="metrics">
+          <div class="metric"><span>מרחק</span><strong id="distanceValue">-</strong></div>
+          <div class="metric"><span>יעד</span><strong id="targetValue">100מ׳</strong></div>
+          <div class="metric"><span>דיוק GPS</span><strong id="accuracyValue">-</strong></div>
+          <div class="metric"><span>הפרש</span><strong id="deltaValue">-</strong></div>
+        </div>
+      </section>
+
+      <section class="bottom-bar">
+        <button id="mainActionBtn" class="main-btn" type="button">הפעל GPS</button>
+      </section>
+    </main>
+
+    <dialog id="helpDialog">
+      <h2 class="help-title">הסבר קצר</h2>
+      <p class="help-text">
+        1. לחצו "הפעל GPS".<br />
+        2. עמדו ליד הרכב ולחצו "אני ליד הרכב התקוע".<br />
+        3. לכו אחורה לאורך הדרך עד שהסטטוס ירוק.<br />
+        במפה: 🚗 רכב תקוע, ⚠️ נקודת הצבה. מעגל מקווקו 50 מטר (מינימום), מעגל מלא 100 מטר (יעד).
+      </p>
+      <button id="closeHelpBtn" class="close-btn" type="button">סגור</button>
+    </dialog>
+
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script>
+      const mainActionBtn = document.getElementById("mainActionBtn");
+      const statusBadge = document.getElementById("statusBadge");
+      const instruction = document.getElementById("instruction");
+      const distanceValue = document.getElementById("distanceValue");
+      const targetValue = document.getElementById("targetValue");
+      const accuracyValue = document.getElementById("accuracyValue");
+      const deltaValue = document.getElementById("deltaValue");
+      const helpBtn = document.getElementById("helpBtn");
+      const helpDialog = document.getElementById("helpDialog");
+      const closeHelpBtn = document.getElementById("closeHelpBtn");
+
+      let watchId = null;
+      let currentPosition = null;
+      let carPosition = null;
+
+      let map = null;
+      let currentMarker = null;
+      let carMarker = null;
+      let minCircle = null;
+      let targetCircle = null;
+      let targetLine = null;
+
+      function toMetersText(value) {
+        if (value === null || value === undefined || Number.isNaN(value)) return "-";
+        return `${Math.round(value)}מ׳`;
+      }
+
+      function setBadge(type, text) {
+        statusBadge.className = `badge ${type}`;
+        statusBadge.textContent = text;
+      }
+
+      function haversineMeters(a, b) {
+        const earth = 6371000;
+        const toRad = (deg) => (deg * Math.PI) / 180;
+        const dLat = toRad(b.lat - a.lat);
+        const dLon = toRad(b.lng - a.lng);
+        const lat1 = toRad(a.lat);
+        const lat2 = toRad(b.lat);
+        const sinDlat = Math.sin(dLat / 2);
+        const sinDlon = Math.sin(dLon / 2);
+        const h = sinDlat * sinDlat + Math.cos(lat1) * Math.cos(lat2) * sinDlon * sinDlon;
+        return 2 * earth * Math.asin(Math.sqrt(h));
+      }
+
+      function createEmojiIcon(emoji) {
+        return L.divIcon({
+          className: "emoji-marker",
+          html: `<span>${emoji}</span>`,
+          iconSize: [30, 30],
+          iconAnchor: [15, 24],
+        });
+      }
+
+      function initMap() {
+        if (!window.L || map) return;
+        map = L.map("map", { zoomControl: true }).setView([31.7683, 35.2137], 15);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          maxZoom: 19,
+          attribution: "&copy; OpenStreetMap contributors",
+        }).addTo(map);
+      }
+
+      function updateMap() {
+        if (!map || !window.L) return;
+
+        if (carPosition) {
+          const carLatLng = [carPosition.lat, carPosition.lng];
+          if (!carMarker) {
+            carMarker = L.marker(carLatLng, { icon: createEmojiIcon("🚗") }).addTo(map);
+          } else {
+            carMarker.setLatLng(carLatLng);
+          }
+
+          if (!minCircle) {
+            minCircle = L.circle(carLatLng, {
+              radius: 50,
+              color: "#0f4da8",
+              dashArray: "6 6",
+              weight: 2,
+              fillOpacity: 0.03,
+            }).addTo(map);
+          } else {
+            minCircle.setLatLng(carLatLng);
+          }
+
+          if (!targetCircle) {
+            targetCircle = L.circle(carLatLng, {
+              radius: 100,
+              color: "#2458e6",
+              weight: 2,
+              fillOpacity: 0.08,
+            }).addTo(map);
+          } else {
+            targetCircle.setLatLng(carLatLng);
+          }
+        }
+
+        if (currentPosition) {
+          const currentLatLng = [currentPosition.lat, currentPosition.lng];
+          if (!currentMarker) {
+            currentMarker = L.marker(currentLatLng, { icon: createEmojiIcon("⚠️") }).addTo(map);
+          } else {
+            currentMarker.setLatLng(currentLatLng);
+          }
+        }
+
+        if (carPosition && currentPosition) {
+          const latlngs = [
+            [carPosition.lat, carPosition.lng],
+            [currentPosition.lat, currentPosition.lng],
+          ];
+          if (!targetLine) {
+            targetLine = L.polyline(latlngs, { color: "#16a34a", weight: 3 }).addTo(map);
+          } else {
+            targetLine.setLatLngs(latlngs);
+          }
+          map.fitBounds(L.latLngBounds(latlngs).pad(0.42), { animate: true });
+          return;
+        }
+
+        if (currentPosition) {
+          map.setView([currentPosition.lat, currentPosition.lng], 17);
+          return;
+        }
+
+        if (carPosition) {
+          map.setView([carPosition.lat, carPosition.lng], 17);
+        }
+      }
+
+      function updateButtonLabel() {
+        if (watchId === null) {
+          mainActionBtn.textContent = "הפעל GPS";
+          return;
+        }
+        if (!carPosition) {
+          mainActionBtn.textContent = "אני ליד הרכב התקוע";
+          return;
+        }
+        mainActionBtn.textContent = "עדכן נקודת רכב מחדש";
+      }
+
+      function updateComputedState() {
+        targetValue.textContent = "100מ׳";
+
+        if (!currentPosition) {
+          setBadge("warn", "ממתין ל-GPS");
+          instruction.textContent = "לחצו על הכפתור למטה להפעלת GPS.";
+          distanceValue.textContent = "-";
+          accuracyValue.textContent = "-";
+          deltaValue.textContent = "-";
+          updateButtonLabel();
+          return;
+        }
+
+        accuracyValue.textContent = toMetersText(currentPosition.accuracy);
+
+        if (!carPosition) {
+          setBadge("warn", "סמנו רכב");
+          instruction.textContent = "עמדו ליד הרכב ולחצו על הכפתור התחתון.";
+          distanceValue.textContent = "-";
+          deltaValue.textContent = "-";
+          updateButtonLabel();
+          return;
+        }
+
+        const distance = haversineMeters(carPosition, currentPosition);
+        const delta = distance - 100;
+        const tolerance = Math.max(5, currentPosition.accuracy || 0);
+        const minDistance = 50;
+
+        distanceValue.textContent = toMetersText(distance);
+        deltaValue.textContent = `${delta >= 0 ? "+" : ""}${Math.round(delta)}מ׳`;
+
+        if (distance < minDistance - tolerance) {
+          setBadge("danger", "קרוב מדי");
+          instruction.textContent = `התרחקו עוד ${Math.max(0, Math.round(minDistance - distance))}מ׳ לפחות.`;
+          updateButtonLabel();
+          return;
+        }
+
+        if (Math.abs(delta) <= tolerance) {
+          setBadge("ok", "מיקום מצוין");
+          instruction.textContent = "אפשר להציב כאן את המשולש.";
+          updateButtonLabel();
+          return;
+        }
+
+        if (distance < 100 - tolerance) {
+          setBadge("warn", "חוקי, אפשר לשפר");
+          instruction.textContent = `מותר, אבל עדיף עוד ${Math.round(100 - distance)}מ׳.`;
+          updateButtonLabel();
+          return;
+        }
+
+        setBadge("warn", "עברתם יעד");
+        instruction.textContent = `עברתם בכ-${Math.round(delta)}מ׳, אפשר להתקרב מעט.`;
+        updateButtonLabel();
+      }
+
+      function startTracking() {
+        if (!("geolocation" in navigator)) {
+          setBadge("danger", "לא נתמך");
+          instruction.textContent = "הדפדפן לא תומך ב-GPS.";
+          return;
+        }
+        if (watchId !== null) return;
+
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            currentPosition = {
+              lat: position.coords.latitude,
+              lng: position.coords.longitude,
+              accuracy: position.coords.accuracy,
+            };
+            updateComputedState();
+            updateMap();
+          },
+          (error) => {
+            setBadge("danger", "שגיאת GPS");
+            instruction.textContent = `לא ניתן לקבל מיקום (${error.message}).`;
+          },
+          { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
+        );
+
+        setBadge("warn", "מאתחל GPS");
+        instruction.textContent = "אשרו הרשאת מיקום במכשיר.";
+        updateButtonLabel();
+      }
+
+      function handleMainAction() {
+        if (watchId === null) {
+          startTracking();
+          return;
+        }
+        if (!currentPosition) {
+          instruction.textContent = "ממתינים לנעילת GPS...";
+          return;
+        }
+
+        carPosition = {
+          lat: currentPosition.lat,
+          lng: currentPosition.lng,
+        };
+        instruction.textContent = "נקודת הרכב נשמרה. התחילו ללכת אחורה לאורך הדרך.";
+        setBadge("warn", "רכב סומן");
+        updateComputedState();
+        updateMap();
+      }
+
+      mainActionBtn.addEventListener("click", handleMainAction);
+      helpBtn.addEventListener("click", () => helpDialog.showModal());
+      closeHelpBtn.addEventListener("click", () => helpDialog.close());
+
+      initMap();
+      updateComputedState();
+    </script>
+  </body>
+</html>

@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>מחשבון מרחק עצירה</title>
+    <style>
+      :root {
+        --bg: linear-gradient(145deg, #0d1630, #17274f 65%, #223b71);
+        --card: rgba(255, 255, 255, 0.96);
+        --text: #15203a;
+        --muted: #5c6a85;
+        --accent: #1f63ff;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 100%; height: 100%; font-family: "Segoe UI", Tahoma, Arial, sans-serif; }
+      body {
+        background: var(--bg);
+        display: grid;
+        place-items: center;
+        padding: 12px;
+        color: var(--text);
+      }
+      .app {
+        width: min(540px, 100%);
+        background: var(--card);
+        border-radius: 16px;
+        padding: 14px;
+        box-shadow: 0 20px 40px rgba(0, 0, 0, 0.25);
+      }
+      .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+      h1 { margin: 0; font-size: 1.04rem; }
+      a {
+        text-decoration: none;
+        background: #eaf0ff;
+        color: #1e4ab3;
+        border-radius: 999px;
+        padding: 6px 10px;
+        font-size: 0.78rem;
+        font-weight: 700;
+      }
+      .speed {
+        margin-top: 10px;
+        border: 1px solid #d7e0f3;
+        border-radius: 14px;
+        padding: 12px;
+      }
+      .speed-kmh { font-size: 2rem; font-weight: 800; line-height: 1; }
+      .muted { color: var(--muted); font-size: 0.82rem; }
+      .grid {
+        margin-top: 10px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+      }
+      .item {
+        border: 1px solid #d7e0f3;
+        border-radius: 12px;
+        padding: 10px;
+        background: #fff;
+      }
+      .item .label { color: var(--muted); font-size: 0.76rem; }
+      .item .val { margin-top: 3px; font-size: 1.08rem; font-weight: 700; }
+      .actions { margin-top: 10px; display: grid; gap: 8px; }
+      button {
+        border: 0;
+        border-radius: 12px;
+        min-height: 46px;
+        font-size: 0.92rem;
+        font-weight: 700;
+        cursor: pointer;
+      }
+      .primary { background: linear-gradient(135deg, #1e63ff, #3177ff); color: #fff; }
+      .secondary { background: #edf2ff; color: #234aa8; }
+      .formula {
+        margin-top: 10px;
+        border: 1px solid #d7e0f3;
+        border-radius: 12px;
+        padding: 10px;
+        font-size: 0.78rem;
+        color: var(--muted);
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <main class="app">
+      <div class="top">
+        <h1>מחשבון מרחק עצירה</h1>
+        <a href="/triangle-warning-assistant.html">לעוזר משולש</a>
+      </div>
+
+      <section class="speed">
+        <div class="muted">מהירות נוכחית</div>
+        <div id="speedKmh" class="speed-kmh">0 קמ״ש</div>
+        <div id="gpsStatus" class="muted">לחצו על "הפעל GPS"</div>
+      </section>
+
+      <section class="grid">
+        <div class="item">
+          <div class="label">מרחק תגובה</div>
+          <div id="reactionDistance" class="val">0 מ׳</div>
+        </div>
+        <div class="item">
+          <div class="label">מרחק בלימה</div>
+          <div id="brakingDistance" class="val">0 מ׳</div>
+        </div>
+        <div class="item" style="grid-column: 1 / -1;">
+          <div class="label">מרחק עצירה כולל</div>
+          <div id="stoppingDistance" class="val">0 מ׳</div>
+        </div>
+      </section>
+
+      <section class="actions">
+        <button id="startBtn" class="primary" type="button">הפעל GPS</button>
+        <button id="resetBtn" class="secondary" type="button">אפס</button>
+      </section>
+
+      <section class="formula">
+        מרחק תגובה = קמ״ש × 1000 / 4800<br />
+        מרחק בלימה = (קמ״ש²) / 180<br />
+        מרחק עצירה = מרחק תגובה + מרחק בלימה
+      </section>
+    </main>
+
+    <script>
+      const speedKmhEl = document.getElementById("speedKmh");
+      const gpsStatusEl = document.getElementById("gpsStatus");
+      const reactionEl = document.getElementById("reactionDistance");
+      const brakingEl = document.getElementById("brakingDistance");
+      const stoppingEl = document.getElementById("stoppingDistance");
+      const startBtn = document.getElementById("startBtn");
+      const resetBtn = document.getElementById("resetBtn");
+
+      let watchId = null;
+
+      function round1(value) {
+        return Math.round(value * 10) / 10;
+      }
+
+      function setValues(speedKmh) {
+        const reaction = (speedKmh * 1000) / 4800;
+        const braking = (speedKmh * speedKmh) / 180;
+        const stopping = reaction + braking;
+
+        speedKmhEl.textContent = `${round1(speedKmh)} קמ״ש`;
+        reactionEl.textContent = `${round1(reaction)} מ׳`;
+        brakingEl.textContent = `${round1(braking)} מ׳`;
+        stoppingEl.textContent = `${round1(stopping)} מ׳`;
+      }
+
+      function startGps() {
+        if (!("geolocation" in navigator)) {
+          gpsStatusEl.textContent = "הדפדפן לא תומך ב-GPS";
+          return;
+        }
+        if (watchId !== null) return;
+
+        gpsStatusEl.textContent = "מפעיל GPS... אשרו הרשאה";
+        watchId = navigator.geolocation.watchPosition(
+          (position) => {
+            const speedMs = position.coords.speed ?? 0;
+            const speedKmh = Math.max(0, speedMs * 3.6);
+            gpsStatusEl.textContent = `דיוק: ${Math.round(position.coords.accuracy)} מ׳`;
+            setValues(speedKmh);
+          },
+          (error) => {
+            gpsStatusEl.textContent = `שגיאת GPS: ${error.message}`;
+          },
+          { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
+        );
+      }
+
+      function resetValues() {
+        setValues(0);
+        gpsStatusEl.textContent = watchId === null ? 'לחצו על "הפעל GPS"' : gpsStatusEl.textContent;
+      }
+
+      startBtn.addEventListener("click", startGps);
+      resetBtn.addEventListener("click", resetValues);
+      setValues(0);
+    </script>
+  </body>
+</html>

@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="he" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>תרגול בלימת חירום</title>
+    <style>
+      :root {
+        --bg: linear-gradient(145deg, #0b1530, #1b2d55 64%, #26447a);
+        --card: rgba(255, 255, 255, 0.96);
+        --text: #15203a;
+        --muted: #60708f;
+        --accent: #1f66ff;
+        --danger: #bf3b3b;
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; width: 100%; height: 100%; font-family: "Segoe UI", Tahoma, Arial, sans-serif; }
+      body { background: var(--bg); padding: 12px; color: var(--text); }
+      .app {
+        max-width: 620px;
+        margin: 0 auto;
+        background: var(--card);
+        border-radius: 16px;
+        padding: 14px;
+        box-shadow: 0 20px 40px rgba(0,0,0,0.25);
+      }
+      .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+      h1 { margin: 0; font-size: 1.04rem; }
+      a { text-decoration: none; background: #ecf2ff; color: #1f4bb0; border-radius: 999px; padding: 6px 10px; font-size: .78rem; font-weight: 700; }
+      .warn {
+        margin-top: 10px;
+        border: 1px solid #f2c9c9;
+        background: #fff2f2;
+        color: #7d2525;
+        border-radius: 12px;
+        padding: 10px;
+        font-size: .8rem;
+        line-height: 1.45;
+      }
+      .card { margin-top: 10px; border: 1px solid #d8e1f4; border-radius: 12px; padding: 10px; }
+      .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 8px; }
+      .metric { border: 1px solid #d8e1f4; border-radius: 10px; padding: 8px; background: #fff; }
+      .metric .k { color: var(--muted); font-size: .75rem; }
+      .metric .v { margin-top: 3px; font-size: 1rem; font-weight: 700; }
+      .status { margin-top: 8px; font-size: .85rem; font-weight: 700; }
+      .actions { display: grid; gap: 8px; margin-top: 10px; }
+      button {
+        border: 0; border-radius: 12px; min-height: 46px; cursor: pointer;
+        font-size: .9rem; font-weight: 700;
+      }
+      .primary { background: linear-gradient(135deg, #1f66ff, #3a7cff); color: #fff; }
+      .secondary { background: #edf2ff; color: #2549a6; }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: .78rem; }
+      th, td { border-bottom: 1px solid #e1e8f6; padding: 6px; text-align: right; }
+      th { color: var(--muted); font-weight: 700; }
+      .danger { color: var(--danger); }
+    </style>
+  </head>
+  <body>
+    <main class="app">
+      <div class="top">
+        <h1>תרגול בלימת חירום</h1>
+        <a href="/triangle-warning-assistant.html">חזרה</a>
+      </div>
+
+      <div class="warn">
+        לתרגול במקום סטרילי, ללא תנועה ורק כשבטוח לחלוטין. הכלי מיועד לאימון בלבד.
+      </div>
+
+      <section class="card">
+        <div>יעדי הפתעה: <strong>10</strong>, <strong>15</strong>, <strong>20</strong>, <strong>30</strong> קמ״ש</div>
+        <div class="status" id="statusText">הפעל GPS כדי להתחיל.</div>
+        <div class="row">
+          <div class="metric"><div class="k">מהירות נוכחית</div><div id="speedNow" class="v">0 קמ״ש</div></div>
+          <div class="metric"><div class="k">יעד הבא</div><div id="nextTarget" class="v">10 קמ״ש</div></div>
+        </div>
+        <div class="actions">
+          <button id="startBtn" class="primary" type="button">הפעל GPS ותרגיל</button>
+          <button id="resetBtn" class="secondary" type="button">איפוס תרגיל</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <strong>תוצאות</strong>
+        <table>
+          <thead>
+            <tr>
+              <th>יעד</th>
+              <th>זמן תגובה (ש׳)</th>
+              <th>מרחק תגובה (מ׳)</th>
+              <th>מרחק בלימה (מ׳)</th>
+            </tr>
+          </thead>
+          <tbody id="resultsBody">
+            <tr><td colspan="4" style="color:#6b7895;">אין עדיין תוצאות.</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+
+    <script>
+      const targets = [10, 15, 20, 30];
+      const speedNowEl = document.getElementById("speedNow");
+      const nextTargetEl = document.getElementById("nextTarget");
+      const statusTextEl = document.getElementById("statusText");
+      const startBtn = document.getElementById("startBtn");
+      const resetBtn = document.getElementById("resetBtn");
+      const resultsBody = document.getElementById("resultsBody");
+
+      let watchId = null;
+      let targetIndex = 0;
+      let activeDrill = null;
+      let lastPosition = null;
+      let completed = [];
+      let audioCtx = null;
+
+      function round2(n) { return Math.round(n * 100) / 100; }
+      function kmhFromMs(ms) { return Math.max(0, (ms || 0) * 3.6); }
+
+      function beep() {
+        const ctx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+        audioCtx = ctx;
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = "square";
+        osc.frequency.value = 920;
+        gain.gain.value = 0.0001;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        const t = ctx.currentTime;
+        gain.gain.exponentialRampToValueAtTime(0.16, t + 0.01);
+        gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.38);
+        osc.start(t);
+        osc.stop(t + 0.4);
+      }
+
+      function updateResults() {
+        if (completed.length === 0) {
+          resultsBody.innerHTML = '<tr><td colspan="4" style="color:#6b7895;">אין עדיין תוצאות.</td></tr>';
+          return;
+        }
+        resultsBody.innerHTML = completed.map((r) => `
+          <tr>
+            <td>${r.target} קמ״ש</td>
+            <td>${r.reactionTimeSec}</td>
+            <td>${r.reactionDistanceM}</td>
+            <td>${r.brakingDistanceM}</td>
+          </tr>
+        `).join("");
+      }
+
+      function resetDrill() {
+        targetIndex = 0;
+        activeDrill = null;
+        completed = [];
+        nextTargetEl.textContent = `${targets[0]} קמ״ש`;
+        statusTextEl.textContent = "אופס. התחלנו מחדש, האץ בעדינות ליעד.";
+        updateResults();
+      }
+
+      function maybeStartBeepDrill(speedKmh, ts, lat, lng) {
+        if (activeDrill || targetIndex >= targets.length) return;
+        const target = targets[targetIndex];
+        if (speedKmh >= target) {
+          beep();
+          activeDrill = {
+            target,
+            beepTs: ts,
+            beepLat: lat,
+            beepLng: lng,
+            beepSpeedKmh: speedKmh,
+            reactionDetected: false,
+            reactionTs: null,
+            reactionDistanceM: 0,
+            brakingDistanceM: 0,
+            prevSpeedKmh: speedKmh,
+          };
+          statusTextEl.innerHTML = `<span class="danger">צליל הופעל!</span> בלימת חירום עכשיו.`;
+        }
+      }
+
+      function updateActiveDrill(speedKmh, ts, lat, lng) {
+        if (!activeDrill) return;
+
+        const prevSpeed = activeDrill.prevSpeedKmh;
+        if (!activeDrill.reactionDetected && speedKmh < prevSpeed - 1) {
+          activeDrill.reactionDetected = true;
+          activeDrill.reactionTs = ts;
+          activeDrill.reactionDistanceM = haversine(
+            activeDrill.beepLat, activeDrill.beepLng, lat, lng
+          );
+        }
+
+        if (activeDrill.reactionDetected) {
+          activeDrill.brakingDistanceM = haversine(
+            lat, lng,
+            activeDrill.beepLat, activeDrill.beepLng
+          ) - activeDrill.reactionDistanceM;
+          if (activeDrill.brakingDistanceM < 0) activeDrill.brakingDistanceM = 0;
+        }
+
+        if (activeDrill.reactionDetected && speedKmh <= 1.5) {
+          const reactionTimeSec = round2((activeDrill.reactionTs - activeDrill.beepTs) / 1000);
+          completed.push({
+            target: activeDrill.target,
+            reactionTimeSec,
+            reactionDistanceM: round2(activeDrill.reactionDistanceM),
+            brakingDistanceM: round2(activeDrill.brakingDistanceM),
+          });
+          targetIndex += 1;
+          activeDrill = null;
+          updateResults();
+          if (targetIndex >= targets.length) {
+            nextTargetEl.textContent = "הושלם";
+            statusTextEl.textContent = "התרגול הושלם. אפשר לאפס ולנסות שוב.";
+          } else {
+            nextTargetEl.textContent = `${targets[targetIndex]} קמ״ש`;
+            statusTextEl.textContent = "יפה. המשך ליעד הבא.";
+          }
+        } else if (!activeDrill.reactionDetected) {
+          statusTextEl.textContent = "ממתין לתחילת תגובה (ירידת מהירות).";
+        } else {
+          statusTextEl.textContent = "נמדדת בלימה... המשך בלימה עד עצירה מלאה.";
+        }
+
+        activeDrill.prevSpeedKmh = speedKmh;
+      }
+
+      function haversine(lat1, lon1, lat2, lon2) {
+        const R = 6371000;
+        const dLat = (lat2 - lat1) * Math.PI / 180;
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+          Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+          Math.sin(dLon/2) * Math.sin(dLon/2);
+        return 2 * R * Math.asin(Math.sqrt(a));
+      }
+
+      function start() {
+        if (!("geolocation" in navigator)) {
+          statusTextEl.textContent = "הדפדפן לא תומך ב-GPS.";
+          return;
+        }
+        if (watchId !== null) return;
+
+        if (audioCtx && audioCtx.state === "suspended") audioCtx.resume();
+        startBtn.textContent = "GPS פעיל";
+        statusTextEl.textContent = "GPS פעיל. האץ בעדינות ליעד הבא.";
+
+        watchId = navigator.geolocation.watchPosition(
+          (pos) => {
+            const ts = pos.timestamp;
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            const speedKmh = kmhFromMs(pos.coords.speed);
+            speedNowEl.textContent = `${round2(speedKmh)} קמ״ש`;
+            nextTargetEl.textContent = targetIndex < targets.length ? `${targets[targetIndex]} קמ״ש` : "הושלם";
+            if (!lastPosition) lastPosition = { lat, lng, ts };
+
+            maybeStartBeepDrill(speedKmh, ts, lat, lng);
+            updateActiveDrill(speedKmh, ts, lat, lng);
+            lastPosition = { lat, lng, ts };
+          },
+          (err) => {
+            statusTextEl.textContent = `שגיאת GPS: ${err.message}`;
+          },
+          { enableHighAccuracy: true, maximumAge: 300, timeout: 10000 }
+        );
+      }
+
+      startBtn.addEventListener("click", start);
+      resetBtn.addEventListener("click", resetDrill);
+      updateResults();
+    </script>
+  </body>
+</html>
