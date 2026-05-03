@@ -4,7 +4,7 @@ export const styles: Record<string, CSSProperties> = {
   page: {
     minHeight: "100vh",
     background: "var(--page-bg)",
-    padding: "clamp(14px, 3.2vw, 26px) clamp(12px, 3vw, 24px) 132px",
+    padding: "clamp(10px, 2.8vw, 22px) clamp(10px, 2.8vw, 20px) 118px",
     fontFamily: "\"Rubik\", \"Noto Sans Hebrew\", \"Segoe UI\", Arial, sans-serif",
     color: "var(--text-primary)",
     transition: "background 220ms ease, color 220ms ease",
@@ -246,12 +246,13 @@ export const styles: Record<string, CSSProperties> = {
   },
   card: {
     background: "var(--card-bg)",
-    borderRadius: "22px",
-    padding: "clamp(14px, 3.4vw, 24px)",
-    marginBottom: "14px",
+    borderRadius: "20px",
+    padding: "clamp(12px, 3vw, 20px)",
+    marginBottom: "10px",
     boxShadow: "var(--card-shadow)",
     border: "1px solid var(--card-border)",
     backdropFilter: "blur(8px)",
+    transition: "transform 180ms ease, box-shadow 220ms ease",
   },
   sectionTitle: {
     marginTop: 0,
@@ -368,11 +369,12 @@ export const styles: Record<string, CSSProperties> = {
     color: "#ffffff",
     border: "none",
     padding: "11px 18px",
-    borderRadius: "12px",
+    borderRadius: "14px",
     cursor: "pointer",
     fontSize: "15px",
     fontWeight: 700,
-    boxShadow: "0 10px 20px rgba(11, 91, 181, 0.22)",
+    boxShadow: "0 10px 24px rgba(11, 91, 181, 0.28)",
+    transition: "transform 140ms ease, filter 140ms ease",
   },
   mobileSaveButton: {
     width: "100%",
@@ -392,9 +394,10 @@ export const styles: Record<string, CSSProperties> = {
     color: "var(--text-primary)",
     border: "1px solid var(--soft-border)",
     padding: "10px 16px",
-    borderRadius: "12px",
+    borderRadius: "14px",
     cursor: "pointer",
     fontSize: "15px",
+    transition: "transform 140ms ease, background 140ms ease",
   },
   buttonDanger: {
     background: "linear-gradient(135deg, #ef4444 0%, #dc2626 100%)",
@@ -409,15 +412,16 @@ export const styles: Record<string, CSSProperties> = {
   statsGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(155px, 1fr))",
-    gap: "10px",
-    marginBottom: "14px",
+    gap: "8px",
+    marginBottom: "10px",
   },
   statCard: {
     background: "var(--stat-card-bg)",
-    borderRadius: "16px",
-    padding: "12px 13px",
+    borderRadius: "18px",
+    padding: "11px 12px",
     boxShadow: "var(--card-shadow)",
     border: "1px solid var(--stat-card-border)",
+    minHeight: "92px",
   },
   statCardEmphasis: {
     background:
@@ -439,16 +443,16 @@ export const styles: Record<string, CSSProperties> = {
   },
   statTitle: {
     color: "var(--text-muted)",
-    marginBottom: "6px",
-    fontSize: "13px",
+    marginBottom: "4px",
+    fontSize: "12px",
   },
   statTitleOnDark: {
     color: "rgba(226, 243, 255, 0.8)",
   },
   statValue: {
-    fontSize: "clamp(18px, 4.5vw, 24px)",
+    fontSize: "clamp(17px, 4.2vw, 22px)",
     fontWeight: 700,
-    lineHeight: 1.25,
+    lineHeight: 1.2,
   },
   statValueCompact: {
     fontSize: "clamp(15px, 3.4vw, 18px)",
@@ -595,8 +599,8 @@ export const styles: Record<string, CSSProperties> = {
   chartGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
-    gap: "10px",
-    marginBottom: "14px",
+    gap: "8px",
+    marginBottom: "10px",
   },
   chartCard: {
     background: "var(--card-bg)",
