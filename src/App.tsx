@@ -87,6 +87,7 @@ const defaultSettings: UserSettings = {
   currency: "ILS",
   consumptionView: "distance_per_volume",
   theme: "light",
+  uiStyle: "ocean",
 };
 
 const vehicleTextTranslations: Record<string, { en: string; ru: string }> = {
@@ -383,6 +384,7 @@ function normalizeSettings(settings: Partial<UserSettings> | null | undefined): 
     currency: settings?.currency ?? defaultSettings.currency,
     consumptionView: settings?.consumptionView ?? defaultSettings.consumptionView,
     theme: settings?.theme ?? defaultSettings.theme,
+    uiStyle: settings?.uiStyle ?? defaultSettings.uiStyle,
   };
 }
 
@@ -628,6 +630,12 @@ export default function App() {
   const dir = settings.language === "he" ? "rtl" : "ltr";
   const pageThemeStyle =
     settings.theme === "dark" ? styles.pageThemeDark : styles.pageThemeLight;
+  const pagePresetStyle =
+    settings.uiStyle === "sunset"
+      ? styles.stylePresetSunset
+      : settings.uiStyle === "mono"
+        ? styles.stylePresetMono
+        : styles.stylePresetOcean;
   const voiceInputSupported = useMemo(() => {
     if (typeof window === "undefined") return false;
     const speechWindow = window as Window & {
@@ -2384,7 +2392,7 @@ function localizeVehicleText(value: string) {
 
   if (!authReady) {
     return (
-      <div style={{ ...styles.page, ...pageThemeStyle }} dir={dir}>
+      <div style={{ ...styles.page, ...pageThemeStyle, ...pagePresetStyle }} dir={dir}>
         <div style={styles.container}>
           <div style={styles.topBar}>
             <div style={styles.brandRow}>
@@ -2412,13 +2420,13 @@ function localizeVehicleText(value: string) {
           onSubmit={handleAuth}
           onGoogleLogin={handleGoogleLogin}
           onBackToDemo={() => setShowAuth(false)}
-          themeStyle={pageThemeStyle}
+          themeStyle={{ ...pageThemeStyle, ...pagePresetStyle }}
         />
       );
     }
 
     return (
-      <div style={{ ...styles.page, ...pageThemeStyle }} dir={dir}>
+      <div style={{ ...styles.page, ...pageThemeStyle, ...pagePresetStyle }} dir={dir}>
         <div style={styles.container}>
           <div style={styles.demoBanner}>{t.demoModeBanner}</div>
           <div style={styles.topBar}>
@@ -2617,7 +2625,7 @@ function localizeVehicleText(value: string) {
   }
 
   return (
-    <div style={{ ...styles.page, ...pageThemeStyle }} dir={dir}>
+    <div style={{ ...styles.page, ...pageThemeStyle, ...pagePresetStyle }} dir={dir}>
       <div style={styles.container}>
         <div style={styles.topBar}>
           <div style={styles.brandRow}>

@@ -92,6 +92,7 @@ export type VolumeUnit = "l" | "gal";
 export type CurrencyUnit = "ILS" | "USD" | "RUB" | "EUR";
 export type ConsumptionView = "distance_per_volume" | "volume_per_100_distance";
 export type ThemeMode = "light" | "dark";
+export type UiStylePreset = "ocean" | "sunset" | "mono";
 
 export type UserSettings = {
   language: Language;
@@ -100,6 +101,7 @@ export type UserSettings = {
   currency: CurrencyUnit;
   consumptionView: ConsumptionView;
   theme: ThemeMode;
+  uiStyle: UiStylePreset;
 };
 
 export type EntryMetaRecord = {

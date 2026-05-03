@@ -40,6 +40,10 @@ type VehicleProfileCardProps = {
     theme: string;
     lightMode: string;
     darkMode: string;
+    stylePreset: string;
+    styleOcean: string;
+    styleSunset: string;
+    styleMono: string;
     hebrew: string;
     english: string;
     russian: string;
@@ -372,6 +376,24 @@ export function VehicleProfileCard({
               >
                 <option value="light">{labels.lightMode}</option>
                 <option value="dark">{labels.darkMode}</option>
+              </select>
+            </div>
+
+            <div style={styles.compactControl}>
+              <label style={styles.compactLabel}>{labels.stylePreset}</label>
+              <select
+                style={styles.compactInput}
+                value={settings.uiStyle}
+                onChange={(event) =>
+                  onSettingsChange({
+                    ...settings,
+                    uiStyle: event.target.value as UserSettings["uiStyle"],
+                  })
+                }
+              >
+                <option value="ocean">{labels.styleOcean}</option>
+                <option value="sunset">{labels.styleSunset}</option>
+                <option value="mono">{labels.styleMono}</option>
               </select>
             </div>
 

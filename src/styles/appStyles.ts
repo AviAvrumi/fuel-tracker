@@ -70,6 +70,24 @@ export const styles: Record<string, CSSProperties> = {
       "linear-gradient(145deg, rgba(30,41,59,0.92) 0%, rgba(15,23,42,0.92) 100%)",
     "--vehicle-box-border": "rgba(71, 85, 105, 0.85)",
   } as CSSProperties,
+  stylePresetOcean: {} as CSSProperties,
+  stylePresetSunset: {
+    "--hero-bg":
+      "linear-gradient(145deg, #4a1d17 0%, #8a2c1b 46%, #e85d04 100%)",
+    "--bottom-bg": "rgba(255, 244, 236, 0.94)",
+    "--bottom-border": "rgba(234, 120, 61, 0.34)",
+    "--soft-bg": "#fff4ec",
+    "--soft-border": "#ffd9bf",
+  } as CSSProperties,
+  stylePresetMono: {
+    "--hero-bg":
+      "linear-gradient(145deg, #111827 0%, #1f2937 52%, #374151 100%)",
+    "--hero-text": "rgba(229, 231, 235, 0.92)",
+    "--soft-bg": "rgba(148, 163, 184, 0.1)",
+    "--soft-border": "rgba(148, 163, 184, 0.35)",
+    "--bottom-bg": "rgba(241, 245, 249, 0.92)",
+    "--bottom-border": "rgba(148, 163, 184, 0.4)",
+  } as CSSProperties,
   container: {
     maxWidth: "1200px",
     margin: "0 auto",
