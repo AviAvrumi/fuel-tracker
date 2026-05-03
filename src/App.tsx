@@ -33,6 +33,12 @@ import {
   upsertProfile,
 } from "./services/fuelTracker";
 import { styles } from "./styles/appStyles";
+import {
+  isFinitePositiveNumber,
+  sanitizeMultilineInput,
+  sanitizePlateInput,
+  sanitizeTextInput,
+} from "./security/input";
 import type {
   AuthMode,
   CloudAppState,
@@ -1422,15 +1428,23 @@ export default function App() {
   }
 
   function updateVehicleForm(field: keyof VehicleFormState, value: string) {
+    const normalizedValue =
+      field === "licensePlate"
+        ? sanitizePlateInput(value)
+        : field === "manufacturer" || field === "model"
+          ? sanitizeTextInput(value, 80)
+          : value;
     setVehicleForm((currentForm) => ({
       ...currentForm,
-      [field]: value,
+      // SECURITY: sanitize trusted form state before persistence/use in queries.
+      [field]: normalizedValue,
       ...(field === "manufacturer" ? { model: "" } : {}),
     }));
   }
 
   async function handleLookupByPlate() {
-    const plate = (vehicleForm.licensePlate ?? "").trim();
+    // SECURITY: allow only numeric plate input for registry lookup.
+    const plate = sanitizePlateInput(vehicleForm.licensePlate ?? "");
     if (!plate) {
       alert(t.plateRequired);
       return;
@@ -1458,15 +1472,16 @@ export default function App() {
     }
 
     const yearValue = String(data.shnat_yitzur ?? "").trim();
-    const numericPlate = plate.replace(/\D/g, "");
-    const rawManufacturer = String(data.tozeret_nm ?? "").trim();
+    const numericPlate = sanitizePlateInput(plate);
+    // SECURITY: sanitize external registry text before storing in app state.
+    const rawManufacturer = sanitizeTextInput(String(data.tozeret_nm ?? "").trim(), 80);
     const mappedManufacturer =
       findBestManufacturerFromRegistry(rawManufacturer, manufacturers) ||
       rawManufacturer;
 
     const rawModelCandidates = [
-      String(data.kinuy_mishari ?? "").trim(),
-      String(data.degem_nm ?? "").trim(),
+      sanitizeTextInput(String(data.kinuy_mishari ?? "").trim(), 80),
+      sanitizeTextInput(String(data.degem_nm ?? "").trim(), 80),
     ].filter((value) => value.length > 0);
     const knownModels =
       VEHICLES.find((item) => item.brand === mappedManufacturer)?.models ?? [];
@@ -1540,11 +1555,14 @@ export default function App() {
     const vehicleId = existingVehicle?.id ?? createVehicleId();
     const nextVehicle: VehicleRecord = {
       id: vehicleId,
-      manufacturer: vehicleForm.manufacturer,
-      model: vehicleForm.model,
+      // SECURITY: sanitize user-controlled profile strings before local/cloud storage.
+      manufacturer: sanitizeTextInput(vehicleForm.manufacturer, 80),
+      // SECURITY: sanitize user-controlled profile strings before local/cloud storage.
+      model: sanitizeTextInput(vehicleForm.model, 80),
       year: yearNumber,
       fuelType: normalizeFuelTypeKey(vehicleForm.fuelType),
-      licensePlate: (vehicleForm.licensePlate ?? "").replace(/\D/g, ""),
+      // SECURITY: constrain license plate format to digits only.
+      licensePlate: sanitizePlateInput(vehicleForm.licensePlate ?? ""),
       benchmarkLitersPer100Km: vehicleForm.benchmarkLitersPer100Km
         ? Number(vehicleForm.benchmarkLitersPer100Km)
         : null,
@@ -1641,6 +1659,12 @@ export default function App() {
   }
 
   function updateForm(field: keyof FuelFormState, value: string) {
+    const sanitizedValue =
+      field === "station"
+        ? sanitizeTextInput(value, 120)
+        : field === "notes"
+          ? sanitizeMultilineInput(value, 400)
+          : value;
     setForm((currentForm) => {
       if (field === "vehicleId") {
         const selected = vehicles.find((vehicle) => vehicle.id === value) ?? null;
@@ -1650,7 +1674,8 @@ export default function App() {
           fuelType: selected?.fuelType ?? currentForm.fuelType,
         };
       }
-      return { ...currentForm, [field]: value };
+      // SECURITY: sanitize text form fields before write to state/DB.
+      return { ...currentForm, [field]: sanitizedValue };
     });
   }
 
@@ -1695,7 +1720,13 @@ export default function App() {
       selectedVehicle?.fuelType ?? form.fuelType
     );
 
-    if (!form.date || !form.time || !liters || !totalPrice || !odometer) {
+    if (
+      !form.date ||
+      !form.time ||
+      !isFinitePositiveNumber(liters) ||
+      !isFinitePositiveNumber(totalPrice) ||
+      !isFinitePositiveNumber(odometer)
+    ) {
       alert(t.fuelRequired);
       return;
     }
@@ -1755,8 +1786,10 @@ export default function App() {
         total_price: totalPrice,
         odometer,
         fuel_type: normalizedFuelType,
-        station: form.station,
-        notes: form.notes,
+        // SECURITY: sanitized station text stored for display/export.
+        station: sanitizeTextInput(form.station, 120),
+        // SECURITY: sanitized notes reduce stored XSS/log-injection risks.
+        notes: sanitizeMultilineInput(form.notes, 400),
         fuel_time: form.time,
         vehicle_local_id: form.vehicleId,
       };
@@ -1768,6 +1801,10 @@ export default function App() {
 
       const { data, error } = await updateFuelEntry(editingEntryId, {
         ...form,
+        // SECURITY: sanitize outbound payload before remote persistence.
+        station: sanitizeTextInput(form.station, 120),
+        // SECURITY: sanitize outbound payload before remote persistence.
+        notes: sanitizeMultilineInput(form.notes, 400),
         fuelType: normalizedFuelType,
       });
       if (error) {
@@ -1813,8 +1850,10 @@ export default function App() {
         total_price: totalPrice,
         odometer,
         fuel_type: normalizedFuelType,
-        station: form.station,
-        notes: form.notes,
+        // SECURITY: sanitized station text stored for display/export.
+        station: sanitizeTextInput(form.station, 120),
+        // SECURITY: sanitized notes reduce stored XSS/log-injection risks.
+        notes: sanitizeMultilineInput(form.notes, 400),
         fuel_time: form.time,
         vehicle_local_id: form.vehicleId,
       };
@@ -1822,6 +1861,10 @@ export default function App() {
 
       const { data, error } = await createFuelEntry(session.user.id, {
         ...form,
+        // SECURITY: sanitize outbound payload before remote persistence.
+        station: sanitizeTextInput(form.station, 120),
+        // SECURITY: sanitize outbound payload before remote persistence.
+        notes: sanitizeMultilineInput(form.notes, 400),
         fuelType: normalizedFuelType,
       });
       if (error) {
@@ -1927,7 +1970,8 @@ export default function App() {
   }
 
   async function handleSendFeedback() {
-    const message = feedbackText.trim();
+    // SECURITY: sanitize free-text feedback before sending to backend.
+    const message = sanitizeMultilineInput(feedbackText, 1000);
     if (!message) {
       alert(t.feedbackEmpty);
       return;
@@ -2025,6 +2069,13 @@ function normalizeFuelTypeKey(value: string) {
     }
   return "other";
 }
+
+// Security checklist for this code:
+// - Sanitized hostile text inputs (station, notes, manufacturer/model, feedback) before persistence.
+// - Enforced numeric license-plate normalization for lookup/storage.
+// - Added finite positive-number validation for critical numeric fuel fields.
+// - Preserved server-side ownership checks via existing Supabase RLS policies.
+// - NOT covered here: full server-issued httpOnly auth cookie migration for SPA auth flow.
 
 const registryManufacturerNoiseTokens = new Set([
   "יפן",
